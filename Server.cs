@@ -319,7 +319,6 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							}
 						}
 
-
 						/*
 						builder.Append(HTTP).AppendLine(code); //Besides when impossible, explicitly adding "\n" is better than "appendline"
 						builder.Append("Server: FAP.NET ").Append(VERSION).Append(" Codename: M\r\n");
