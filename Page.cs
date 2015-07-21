@@ -84,7 +84,7 @@ namespace FAP //Change this name!
 		}
 
 		/// <summary>
-		/// Override this for "object oriented" behaviour of defining the get function for this page.
+		/// Override this for "object oriented" behaviour of defining the post function for this page.
 		/// </summary>
 		/// <param name="queryString">Other commands used in the url string, ie /api?command1&command2&other. It's recommended you terminate with a '&' symbol</param>
 		/// <param name="messageContent">Message body content found after the carriage return after the HTTP headers</param>
@@ -97,7 +97,7 @@ namespace FAP //Change this name!
 		}
 
 		/// <summary>
-		/// Delete the specified queryString and messageContent.
+		/// Override this for "object oriented" behaviour of defining the delete function for this page.
 		/// </summary>
 		/// <param name="queryString">Other commands used in the url string, ie /api?command1&command2&other. It's recommended you terminate with a '&' symbol</param>
 		/// <param name="messageContent">Message body content found after the carriage return after the HTTP headers</param>
