@@ -13,7 +13,7 @@ while(1)
 
 # Q/A
 
-Q: Why ```Thread.Sleep(1)``` in an infinite loop?
+Q: Why ```Thread.Sleep(1)``` in an infinite loop within the above example program?
 
 A: As the server is threaded (mostly using ```Task.Factory.StartNew()```) and completely non-blocking, for this library to work you will need an infinite loop, or a timed loop, or a loop with a long-term condition, somewhere within some file. Otherwise your program will end immediately and absolutely no users will arrive and you won't have a full API webservice.
 
