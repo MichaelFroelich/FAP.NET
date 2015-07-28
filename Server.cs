@@ -6,11 +6,10 @@
 	 Everyone is permitted to copy and distribute verbatim copies
 	 of this license document, but changing it is not allowed.
 	 
-	 Author: Michael J. Froelich
+		Author: Michael J. Froelich
  */
 
 using System;
-using FAP;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
@@ -31,7 +30,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		//HTTP initial header
 		const string BREAKER = "\r\n";
 		//New line breaker
-		const string VERSION = "0.1";
+		const string VERSION = "0.2";
 		//Current version
 		const int TIMEOUT = 5;
 		//Send and receive timeout
@@ -91,7 +90,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		public char QueryCharacter {
 			get;
 			set;
-		} = '?';
+		}
 
 		/// <summary>
 		/// Adds a page, mostly
@@ -109,6 +108,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		public void Stop()
 		{
 			ever = false;
+			listener.Server.Close();
 			listener.Stop();
 		}
 		//TODO: Handle the generics better, something that doesn't require collection.Values, because I can't be assured all collections have that function
@@ -123,6 +123,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			pagelist = new SortedList<string, Page>();
 			this.address = IPAddress.Parse(IPAddy);
 			this.port = port;
+			QueryCharacter = '?';
 			//listenerlist = new List<IAsyncResult>()
 			listener = new TcpListener(Address, Port);
 			//incomming = new Queue<TcpClient>(SERVERWARM * 2);
@@ -171,8 +172,12 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				listener.BeginAcceptTcpClient(ListenerCallback, listener); //second param may be listener
 			} catch (Exception e) {
 				Console.Error.WriteLine(DateTime.UtcNow + " Listener error: " + e.Message);
-				if (!listener.Server.IsBound)
-					ResetListener(true);
+				if (!listener.Server.IsBound) {
+					Thread.Sleep(500);
+					if (!listener.Server.IsBound) //IF the listener is still not listening THEN do something about it
+						ResetListener(true);
+					listenercount--;
+				}
 			}
 		}
 
@@ -181,8 +186,10 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			try {
 				//Task.Factory.StartNew(() => Parse(listener.EndAcceptTcpClient(result)));
 				var c = listener.EndAcceptTcpClient(result);
-				Task.Factory.StartNew(() => Parse(c));	//Probably cargo cult, but whatever 
 				listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
+				Parse(c);
+				//Task.Factory.StartNew(() => Parse(c));	//Probably cargo cult, but whatever 
+
 				//c.NoDelay = NODELAY; 					//Increases speed automagically somewhat
 				//Task.Factory.StartNew(() => Parse(c));	//As of Mon, 20 Jul 2015 22:51, I'm assuming this has its own queue
 				//incomming.Enqueue(c);					//Load onto the process queue, note, use a queue (FIFO) and not a stack (LIFO)
@@ -234,7 +241,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								stream.ReadByte(); //Trims '/'
 								break;
 							}
-						} while (input != '\n'/*!char.IsControl(input) && input != '\uffff'*/); //Always be safe
+						} while (!(input == '\uffff' || char.IsControl(input))/*!char.IsControl(input) && input != '\uffff'*/); //Always be safe
 						do {
 							input = (char)stream.ReadByte();
 							if (input == QueryCharacter) {
@@ -245,7 +252,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							else {
 								builder.Append(input);
 							}
-						} while (input != '\n'/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
+						} while (!(input == '\uffff' || char.IsControl(input))/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
 						querystring = builder.ToString();
 						builder.Clear();
 						/*
@@ -276,7 +283,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							input2 = (char)stream.ReadByte();
 						}
 						//*/
-
+						builder.AppendLine(((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString());
 						while (stream.DataAvailable) { 			//Necessary, as not all clients send content-length
 							builder.Append((char)stream.ReadByte());
 						}
@@ -318,6 +325,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									break;
 							}
 						}
+
 
 						/*
 						builder.Append(HTTP).AppendLine(code); //Besides when impossible, explicitly adding "\n" is better than "appendline"
@@ -369,7 +377,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 
 			} catch (Exception e) { 
 				Console.Error.WriteLine(DateTime.UtcNow + " That was a bad client \n\t\t" + client.ToString() + "\n" + e.ToString());   
-				ResetListener(true);
+				ResetListener(true); //This stays as is since 90% of parse errors are the client's fault
 			}
 		}
 
