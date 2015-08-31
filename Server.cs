@@ -53,10 +53,8 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 
 		//List<IAsyncResult> listenerlist; //This has... no way of actually working
 
-		bool ever = true;
-
 		public bool IsRunning {
-			get { return ever; }
+			get { return listener != null && listener.Server.IsBound; }
 		}
 
 		int port;
@@ -107,7 +105,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		/// </summary>
 		public void Stop()
 		{
-			ever = false;
+			//ever = false;
 			listener.Server.Close();
 			listener.Stop();
 		}
@@ -133,13 +131,16 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				foreach (Page p in inList)
 					if (p != null)
 						pagelist.Add(p.Path, p);
-			Task.Factory.StartNew(ListenerLoop); //Staart listening
+			while (listenercount < SERVERWARM) {
+				Task.Factory.StartNew(Listen);
+			}
+			Task.Factory.StartNew(() => ResetListener());
 		}
 
 		/// <summary>
 		/// Used for timing, error recovery and CPU safety
 		/// </summary>
-		void ListenerLoop()
+		/*void ListenerLoop()
 		{ //Yielding is purely a replacement for nice. Nice is a bad idea, but yielding every other method, not so much
 			for (; ever;) {
 				Thread.Yield();							// <.<
@@ -152,7 +153,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					Task.Factory.StartNew(Listen);		//As of writing, starting a task is more performant than a new thread
 			}
 			Console.Error.WriteLine("Server ended at " + System.DateTime.UtcNow);
-		}
+		}*/
 
 		~Server()
 		{
@@ -188,6 +189,15 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				var c = listener.EndAcceptTcpClient(result);
 				listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
 				Parse(c);
+				if (listenercount < SERVERWARM) {
+					Task.Factory.StartNew(Listen);
+					if (listenercount < SERVERWARM) {
+						Task.Factory.StartNew(Listen);
+						if (listenercount < SERVERWARM) {
+							Task.Factory.StartNew(Listen);
+						}
+					}
+				}
 				//Task.Factory.StartNew(() => Parse(c));	//Probably cargo cult, but whatever 
 
 				//c.NoDelay = NODELAY; 					//Increases speed automagically somewhat
@@ -382,27 +392,25 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		}
 
 		async void ResetListener(bool force = false)
-		{// Whilst questionable, many servers kill old listeners and reset them after about 5 minutes
-			if (!force) { //I believe this is the easiest/most efficient means of timing.
-				needsreset = false;
-				await Task.Delay(300000);
-			}
+		{
 			try {
 				listener.Server.Close();	//Fixes an "address in use" error
 				listener.Stop();
-				//incomming.Clear();
 				listenercount = 0;
 				listener = new TcpListener(Address, Port);
 				listener.Server.NoDelay = NODELAY;
 				listener.Start();
-				needsreset |= !force;
+				//needsreset |= !force;
 				while (listenercount < SERVERCOOL) {
 					listenercount++;
 					listener.BeginAcceptTcpClient(ListenerCallback, listener);
 				}
-
+				if (!force) {
+					await Task.Delay(TimeSpan.FromMinutes(5));
+					Task.Factory.StartNew(() => ResetListener());
+				}
 			} catch (Exception e) {
-				Console.Error.WriteLine(System.DateTime.UtcNow + " Reset Error: " + e.Message);
+				Console.Error.WriteLine("06: " + DateTime.UtcNow + " Reset Error: " + e.Message);
 			}
 		}
 
