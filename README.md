@@ -23,7 +23,7 @@ I found a number of options.
 3. Simply ```Thread.Sleep(-1)```, which means "sleep the maximum amount of time" and provides intermediary results.
 4. A ```Thread.Yield()``` in a while loop and this resulted in the best test results which are displayed on my site.
 
-Unfortunately ```Thread.Yield()``` spins the CPU... my thinking on how this function works is by asking whatever mechanism handles the threading and task callbacks to check, meaning if you had a while loop calling ```Thread.Yield()``` multiple times within a second, you'll naturally get better performance. This really comes back to you, as the person likely using my code, and your priorities.
+Unfortunately ```Thread.Yield()``` spins the CPU... my thinking on how this function works is by asking whatever mechanism handles the threading and task callbacks to check, meaning if you had a while loop calling ```Thread.Yield()``` multiple times within a second you'll naturally get better performance. This really comes back to you, as the person likely using my code, and your priorities.
 
 If performance is the priority, I recommend an infinite loop with ```Thread.Yield()```
 If resource efficiency is the priority, I recommend simply ```Thread.Sleep(-1)```
