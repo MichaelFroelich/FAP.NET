@@ -1,4 +1,4 @@
-﻿/*
+/*
 				GNU GENERAL PUBLIC LICENSE
 		                   Version 3, 29 June 2007
 
@@ -23,6 +23,25 @@ namespace FAP //Change this name!
 		/// </summary>
 		/// <value>as a string</value>
 		public string Path{ protected set; get; }
+
+		/// <summary>
+		/// When "got"; are the headers sent from the client machine to the server with the user's HTTP version as the first line (mostly separated by \r\n). When "set"; are extra headers from the server to the client, generally ended in \r\n for each new line.
+		/// Do not modify the headers if you do not wish to add additional headers, just leave it as is. Hint; use Split('\n') and use a case/switch on the first character of each resultant string
+		/// </summary>
+		/// <value>The headers.</value>
+		public string Headers{ get; set; }
+
+		/// <summary>
+		/// The user's IP address as a string, setting this value does nothing.
+		/// </summary>
+		/// <value>The user's IP address</value>
+		public string UserIP { get; set; }
+
+		/// <summary>
+		/// Gets the UserAgent string, very useful for distinguishing two users of the same IP, setting this value does nothing.
+		/// </summary>
+		/// <value>The user's "user agent"</value>
+		public string UserAgent { get; set; }
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="FAP.Page"/> class. Construct by passing through a string that represents the path to this page, ie localhost/api? where "api" is the path name. You do not need to include either a forward slash or a question mark, simply the path name
@@ -60,9 +79,9 @@ namespace FAP //Change this name!
 		/// <summary>
 		/// Override this for "object oriented" behaviour of defining the get function for this page.
 		/// </summary>
-		/// <param name="queryString">Other commands used in the url string, ie /api?command1&command2&other. It's recommended you terminate with a '&' symbol</param>
+		/// <param name="queryString">Other commands used in the url string, ie /api?command1.command2.other. It's recommended you terminate with a '.' symbol</param>
 		/// <param name="messageContent">IP address as a pain text string, then a new line ('\n'), then the message body content found after the carriage return after the HTTP headers</param>
-		public virtual string Get(string queryString = null, string messageContent = null)
+		public virtual string Get(string queryString, string messageContent)
 		{
 			if (this.get != null) {
 				return this.get(queryString, messageContent);
@@ -73,11 +92,11 @@ namespace FAP //Change this name!
 		/// <summary>
 		/// Override this for "object oriented" behaviour of defining the put function for this page.
 		/// </summary>
-		/// <param name="queryString">Other commands used in the url string, ie /api?command1&command2&other. It's recommended you terminate with a '&' symbol</param>
+		/// <param name="queryString">Other commands used in the url string, ie /api?command1.command2.other. It's recommended you terminate with a '.' symbol</param>
 		/// <param name="messageContent">IP address as a pain text string, then a new line ('\n'), then the message body content found after the carriage return after the HTTP headers</param>
-		public virtual string Put(string queryString = null, string messageContent = null)
+		public virtual string Put(string queryString, string messageContent)
 		{
-			if (this.put != null) {
+			if (put != null) {
 				return this.put(queryString, messageContent);
 			}
 			return null;
@@ -86,9 +105,9 @@ namespace FAP //Change this name!
 		/// <summary>
 		/// Override this for "object oriented" behaviour of defining the post function for this page.
 		/// </summary>
-		/// <param name="queryString">Other commands used in the url string, ie /api?command1&command2&other. It's recommended you terminate with a '&' symbol</param>
+		/// <param name="queryString">Other commands used in the url string, ie /api?command1.command2.other. It's recommended you terminate with a '.' symbol</param>
 		/// <param name="messageContent">IP address as a pain text string, then a new line ('\n'), then the message body content found after the carriage return after the HTTP headers</param>
-		public virtual string Post(string queryString = null, string messageContent = null)
+		public virtual string Post(string queryString, string messageContent)
 		{
 			if (this.post != null) {
 				return this.post(queryString, messageContent);
@@ -99,9 +118,9 @@ namespace FAP //Change this name!
 		/// <summary>
 		/// Override this for "object oriented" behaviour of defining the delete function for this page.
 		/// </summary>
-		/// <param name="queryString">Other commands used in the url string, ie /api?command1&command2&other. It's recommended you terminate with a '&' symbol</param>
+		/// <param name="queryString">Other commands used in the url string, ie /api?command1.command2.other. It's recommended you terminate with a '.' symbol</param>
 		/// <param name="messageContent">IP address as a pain text string, then a new line ('\n'), then the message body content found after the carriage return after the HTTP headers</param>
-		public virtual string Delete(string queryString = null, string messageContent = null)
+		public virtual string Delete(string queryString, string messageContent)
 		{
 			if (this.delete != null) {
 				return this.delete(queryString, messageContent);
