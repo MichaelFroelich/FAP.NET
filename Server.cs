@@ -1,4 +1,4 @@
-﻿/*
+/*
 				GNU GENERAL PUBLIC LICENSE
 		                   Version 3, 29 June 2007
 
@@ -16,9 +16,13 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
+using System.IO;
 
 namespace FAP //Functional active pages , Functional programming And Pages, Free API Production, FAP seems like a good name!
 {
+	/// <summary>
+	/// Server.
+	/// </summary>
 	public class Server
 	{
 		/* Constants */
@@ -26,20 +30,16 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		//Have a maximum of this many connections possible
 		const int SERVERCOOL = 251;
 		//If the connection count falls below this level, quickly make a lot more
-		const string HTTP = "HTTP/1.0 ";
-		//HTTP initial header
-		const string BREAKER = "\r\n";
-		//New line breaker
-		const string VERSION = "0.2";
+		const string HTTP = "HTTP/1.1 ";
+		//This causes issues if set to anything greater or lesser (excluding 1.0)
+		const string VERSION = "1.6";
 		//Current version
 		const int TIMEOUT = 5;
 		//Send and receive timeout
-		const bool NODELAY = true;
+		const bool NODELAY = false;
 		//Nagle algorithm thing
 		/* State booleans */
-		//bool queueProcessLock = false;
-		//Locks and unlocks the queue
-		bool needsreset = true;
+		//bool needsreset = true;
 		//Used to reset the listeners every 5 minutes (remember, Apache and NGINX do this too!)
 		/* Other private variables */
 		int listenercount = 0;
@@ -48,17 +48,27 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		//the main listener, will be duplicated in later versions, perhaps for added speed
 		//Queue<TcpClient> incomming;
 		//The queue
-		SortedList<string, Page> pagelist;
+		Dictionary<string, Page> pagelist;
 		//Where all the pages are kept
+		Dictionary<string, HashSet<int>> cache304;
 
-		//List<IAsyncResult> listenerlist; //This has... no way of actually working
+		//List<IAsyncResult> listenerlist; //This has... no way of actually workin
+		//bool ever = true;
 
+		/// <summary>
+		/// Returns whether the listening/timing loop is currently running
+		/// </summary>
+		/// <value><c>true</c> if this instance is running; otherwise, <c>false</c>.</value>
 		public bool IsRunning {
 			get { return listener != null && listener.Server.IsBound; }
 		}
 
 		int port;
 
+		/// <summary>
+		/// Gets or sets the application port, I highly recommend you leave it at 1024
+		/// </summary>
+		/// <value>The application port.</value>
 		public int Port {
 			get { return port; }
 			set {
@@ -73,6 +83,10 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		/// <value>The address.</value>
 		IPAddress address;
 
+		/// <summary>
+		/// Gets or sets the ip address.
+		/// </summary>
+		/// <value>The ip address.</value>
 		public IPAddress Address {
 			get { return address; }
 			set {
@@ -91,13 +105,50 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		}
 
 		/// <summary>
+		/// Gets or sets the cache's max age.
+		/// </summary>
+		/// <value>The cache's max age.</value>
+		public int CacheMaxAge {
+			get;
+			set;
+		}
+
+		/// <summary>
+		/// Gets or sets the Maximum Transmission Unit, used for determining whether to user chunked transfer encoding or not. Note, if you're using this framework as intended (proxied through NGINX or Apache), your static webserver/proxy may chunk anyway. 
+		/// </summary>
+		/// <value>The Maximum Transmission Unit.</value>
+		public int MTU {
+			get;
+			set;
+		}
+
+		/// <summary>
 		/// Adds a page, mostly
 		/// </summary>
-		/// <param name="p">P.</param>
+		/// <param name="p">Pages, single pages</param>
 		public void AddPage(Page p)
 		{
 			if (p != null)
 				pagelist.Add(p.Path, p);
+		}
+
+		/// <summary>
+		/// Adds a list of pages
+		/// </summary>
+		/// <param name="inList">A list or array of page through IEnumerable.</param>
+		public void AddPage(IEnumerable<Page> inList)
+		{
+			foreach (Page p in inList)
+				if (p != null)
+					pagelist.Add(p.Path, p);
+		}
+
+		/// <summary>
+		/// Clears all the pages, so you can reload a new list in.
+		/// </summary>
+		public void ClearPages()
+		{
+			pagelist.Clear();
 		}
 
 		/// <summary>
@@ -109,22 +160,24 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			listener.Server.Close();
 			listener.Stop();
 		}
-		//TODO: Handle the generics better, something that doesn't require collection.Values, because I can't be assured all collections have that function
+
 		/// <summary>
 		/// Initializes a new instance of the <see cref="FAP.Server"/> class.
 		/// </summary>
-		/// <param name="inList">A list of pages, try "Your data structure".Values.</param>
-		/// <param name="IPAddy">IP address, likely the default: 127.0.0.1 (please use a static webserver in conjunction with FAP.net)</param>
-		/// <param name="port">Port for a complete socket, default is 1024</param>
-		public Server(IEnumerable<Page> inList = null, string IPAddy = "127.0.0.1", int port = 1024)
+		/// <param name="inList">An IEnumerable of pages, try "Your data structure".Values</param>
+		/// <param name="IpAddress">IP address, likely the default: 127.0.0.1 (please use a static webserver in conjunction with FAP.net)</param>
+		/// <param name="port">Port or application port for a complete socket, default is 1024</param>
+		/// <param name="mtu">mtu or Maximum Transmission Unit is the maximum size of a tcp packet, used for determining whether to user chunked transfer encoding or not</param>
+		public Server(IEnumerable<Page> inList = null, string IpAddress = "127.0.0.1", int port = 1024, int mtu = 65535)
 		{
-			pagelist = new SortedList<string, Page>();
-			this.address = IPAddress.Parse(IPAddy);
+			pagelist = new Dictionary<string, Page>();
+			address = IPAddress.Parse(IpAddress);
 			this.port = port;
 			QueryCharacter = '?';
-			//listenerlist = new List<IAsyncResult>()
+			CacheMaxAge = 31536000; //About an hour
+			MTU = mtu; // Essentially the current MTU max
 			listener = new TcpListener(Address, Port);
-			//incomming = new Queue<TcpClient>(SERVERWARM * 2);
+			cache304 = new Dictionary<string, HashSet<int>>();
 			listener.Server.NoDelay = NODELAY;
 			listener.Start();
 			if (inList != null)
@@ -138,25 +191,13 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		}
 
 		/// <summary>
-		/// Used for timing, error recovery and CPU safety
+		/// Releases unmanaged resources and performs other cleanup operations before the <see cref="FAP.Server"/> is
+		/// reclaimed by garbage collection.
 		/// </summary>
-		/*void ListenerLoop()
-		{ //Yielding is purely a replacement for nice. Nice is a bad idea, but yielding every other method, not so much
-			for (; ever;) {
-				Thread.Yield();							// <.<
-				Thread.Sleep(1); 						// First I look left, then I sleep, then I look right
-				Thread.Yield(); 						// >.>
-				if (needsreset)							//Check if we need to reset the 
-					ResetListener();					//If not, reset all the listeners
-				Thread.Yield();
-				if (listenercount < SERVERWARM)
-					Task.Factory.StartNew(Listen);		//As of writing, starting a task is more performant than a new thread
-			}
-			Console.Error.WriteLine("Server ended at " + System.DateTime.UtcNow);
-		}*/
-
 		~Server()
 		{
+			listener.Server.Close();
+			listener.Stop();
 			Stop();
 		}
 
@@ -170,11 +211,12 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						await Task.Delay(50); 			//This basically means "check back in 50ms," it doesn't actually delay/suspend anything
 					} while (listener.Pending());		//Do not spawn whilst the server is being spammed, reserve the ticks for processing
 				}
-				listener.BeginAcceptTcpClient(ListenerCallback, listener); //second param may be listener
+				listener.BeginAcceptTcpClient(ListenerCallback, listener); //second param may be listener or just null
 			} catch (Exception e) {
-				Console.Error.WriteLine(DateTime.UtcNow + " Listener error: " + e.Message);
+				Console.Error.WriteLine("02: " + DateTime.UtcNow + " Listener error: " + e.Message);
 				if (!listener.Server.IsBound) {
-					Thread.Sleep(500);
+					Console.Error.Write(", will attempt to reset in 0.5 seconds");
+					await Task.Delay(500);
 					if (!listener.Server.IsBound) //IF the listener is still not listening THEN do something about it
 						ResetListener(true);
 					listenercount--;
@@ -185,10 +227,10 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		void ListenerCallback(IAsyncResult result)
 		{
 			try {
-				//Task.Factory.StartNew(() => Parse(listener.EndAcceptTcpClient(result)));
-				var c = listener.EndAcceptTcpClient(result);
-				listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
-				Parse(c);
+				using (var c = listener.EndAcceptTcpClient(result)) {
+					listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
+					Parse(c);								//This makes the assumption you're already in a unique thread
+				}
 				if (listenercount < SERVERWARM) {
 					Task.Factory.StartNew(Listen);
 					if (listenercount < SERVERWARM) {
@@ -196,62 +238,52 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						if (listenercount < SERVERWARM) {
 							Task.Factory.StartNew(Listen);
 						}
+						Thread.Yield(); //yielding here, as necessary work is competing against unnecesssary work (exiting this function)
 					}
+					Thread.Yield();
 				}
-				//Task.Factory.StartNew(() => Parse(c));	//Probably cargo cult, but whatever 
+			} catch { //This does hide errors... but even Apache and NGINX reset their listeners, so should we and it's always going to throw errors
+				//Console.Error.WriteLine("03: " + DateTime.UtcNow + " Callback error, probably just resetting but specifically: " + e.Message);
+			}
+		}
 
-				//c.NoDelay = NODELAY; 					//Increases speed automagically somewhat
-				//Task.Factory.StartNew(() => Parse(c));	//As of Mon, 20 Jul 2015 22:51, I'm assuming this has its own queue
-				//incomming.Enqueue(c);					//Load onto the process queue, note, use a queue (FIFO) and not a stack (LIFO)
-				//if (!queueProcessLock)
-				//	ProcessQueue();
-			} catch (Exception e) {
-				Console.Error.WriteLine(DateTime.UtcNow + " Callback error, probably just resetting but specifically: " + e.Message);
-			}
-		}
-		/*
-		void ProcessQueue()
-		{
-			queueProcessLock = true;					//A VERY cheap way to ensure the queue isn't being processed multiple times
-			while (incomming.Count > 0) {
-				var t = incomming.Dequeue();
-				Task.Factory.StartNew(() => Parse(t));				//Provided this is only being called in one place, there is no issue
-			}
-			queueProcessLock = false;
-		}
-*/
 		void Parse(TcpClient client)
 		{
 			char input;
-			//char input2;
 			char method1;
 			char method2;
-			string code = "404 Not Found"; //Default
-			//string s = "";
+			string code = "404"; //404 fail safe
 			string message;
-			string output = "";
+			string output = null;
 			string querystring = "";
 			string path = "";
+			string contenttype = "";
+			string headers = "";
+			string useragent = "";
+			int currentHash = -1;
+			bool isIE = false;
+			HashSet<int> clientCache = null;
 			StringBuilder builder = new StringBuilder();
-			client.NoDelay = NODELAY;
+			StringBuilder headerbuilder = new StringBuilder(); 
+			Page thispage;
+			//client.NoDelay = NODELAY; //Usually best left as the default, uncomment and change NODELAY at the top of this file if required
 			if (client == null || !client.Connected)
-				return; 
+				return;
 			try {
 				//using (var reader = new StreamReader(stream))//using (var writer = new StreamWriter(stream)) 
 				using (var stream = client.GetStream()) {//In the end, the reward for only using one stream is immeasurable				
 					//if (/*stream.DataAvailable && */stream.CanRead && stream.CanWrite) {
 					if (stream.CanRead) {
-						//s = builder.Append((char)stream.ReadByte() + (char)stream.ReadByte()).ToString(); //G
-						//s = string.Format("" + (char)stream.ReadByte() + (char)stream.ReadByte()); //G
-						method1 = (char)stream.ReadByte(); //E
-						method2 = (char)stream.ReadByte(); //T , get it?
+						#region inputparser
+						method1 = (char)stream.ReadByte(); //G
+						method2 = (char)stream.ReadByte(); //E , get it?
 						do {
 							input = (char)stream.ReadByte();
 							if (input == ' ') {
 								stream.ReadByte(); //Trims '/'
 								break;
 							}
-						} while (!(input == '\uffff' || char.IsControl(input))/*!char.IsControl(input) && input != '\uffff'*/); //Always be safe
+						} while (!(input == '\uffff' || input == '\r')/*!char.IsControl(input) && input != '\uffff'*/); //FYI '\ufff' == -1
 						do {
 							input = (char)stream.ReadByte();
 							if (input == QueryCharacter) {
@@ -262,133 +294,602 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							else {
 								builder.Append(input);
 							}
-						} while (!(input == '\uffff' || char.IsControl(input))/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
+						} while (!(input == '\uffff' || input == '\r')/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
 						querystring = builder.ToString();
 						builder.Clear();
-						/*
-						var splitstring = s.Split(' ');
-						if (splitstring.Length >= 2) {
-							splitstring = splitstring[1].TrimStart('/').Split(QueryCharacter);
-							if (splitstring.Length >= 2) {			//Bottleneck source C# wizards please advise
-								path = splitstring[0];
-								querystring = splitstring[1];
-							}
-						}
-						*/
-						//*
-						while (stream.DataAvailable) { //Gotta be safe... would like to have used this first time' later
+						string ipaddress = null;
+						while (stream.DataAvailable) { 
 							input = (char)stream.ReadByte();
-							if (input == '\n') { 				//This is an inappropriate means of doing this
+							headerbuilder.Append(input);
+							if (input == '\n') { 				//Ensures we only check after a new line
 								input = (char)stream.ReadByte();
-								if (input == '\r') {			//Basicaly, if it reads a null then a carriage, it breaks
-									break;
+								switch (input) {
+									case '\r':
+										stream.ReadByte(); //Trims the '\n'
+										goto NoMoreHeaders; //Virtually the only way how to jump out of a switch within a control loop
+									case 'X':
+									case 'x': //Find x-IP style headers
+										while (input != ':') {
+											builder.Append(input);
+											input = (char)stream.ReadByte();
+										}
+										const string x4rd4 = "x-forwarded-for";
+										const string xreal = "x-real-ip";
+										var ipstring = builder.ToString();
+										if (ipstring.ToLower() == x4rd4 || //In the desperate attempt to ensure HTTP compatibility
+										    ipstring.ToLower() == xreal) {
+											headerbuilder.Append(builder);
+											builder.Clear();
+											headerbuilder.Append(":" + (char)stream.ReadByte()); //Trims the space
+											input = (char)stream.ReadByte();
+											while (input != '\r' && input != ',' && stream.DataAvailable) { //gets the first ip address (ie ipadd1, ipadd2,
+												builder.Append(input);
+												input = (char)stream.ReadByte();
+											}
+											ipaddress = builder.ToString();
+										}
+										headerbuilder.Append(builder);
+										builder.Clear();
+										break;
+									case 'U':
+									case 'u': //Find the user agent
+										while (input != ':') {
+											builder.Append(input);
+											input = (char)stream.ReadByte();
+										}
+										const string useragentheader = "user-agent";
+										var useragentstring = builder.ToString();
+										if (useragentstring.ToLower() == useragentheader) {
+											builder.Clear();
+											input = (char)stream.ReadByte();
+											while (input != '\r') { //Read until the new line
+												builder.Append(input);
+												input = (char)stream.ReadByte();
+											}
+											useragent = builder.ToString();
+											headerbuilder.Append("User-Agent: " + useragent);
+										}
+										builder.Clear();
+										break;
+									default:
+										headerbuilder.Append(input);
+										break;
 								}
-							}
+							} 
 						}
-						//*/
-						/*
-						input2 = (char)stream.ReadByte(); //This is actually a slower, although more expressive, means
-						while (input != '\n' && input2 != '\r') {
-							input = input2;
-							input2 = (char)stream.ReadByte();
+
+						NoMoreHeaders:
+						headers = headerbuilder.ToString();
+						if (ipaddress == null) { //Next best guess for the ip address
+							ipaddress = (((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString()); 
 						}
-						//*/
-						builder.AppendLine(((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString());
-						while (stream.DataAvailable) { 			//Necessary, as not all clients send content-length
-							builder.Append((char)stream.ReadByte());
+						List<byte> utf8bytes = new List<byte>();
+						while (stream.DataAvailable) {
+							utf8bytes.Add((byte)stream.ReadByte());
 						}
-						message = builder.ToString();
-						builder.Clear();
-						Page thispage;
-						if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out thispage)) {
+						message = Encoding.UTF8.GetString(utf8bytes.ToArray());
+						#endregion
+						#region PageProcessor
+						if (querystring.Length > MTU) {
+							code = "414"; //If the query string turns out to be greater than the MTU, generate an URI too big error
+							headers = "";
+						} else if (headers.Length > MTU) {
+							code = "431"; //If the query string turns out to be greater than the MTU, generate an URI too big error
+							headers = "";
+						} else if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out thispage)) {
+							thispage.Headers = headers; //Page variables
+							thispage.UserIP = ipaddress;
+							thispage.UserAgent = useragent;
 							switch (method1) {
+								case 'h':
+								case 'H': //Head
 								case 'g':
-								case 'G':
-									output = thispage.Get(querystring, message);
-									if (output != null) //as in, actually null
-										code = "200 Ok";
-									break;
+								case 'G': //Get
+									{		//"HEAD" is identical to "GET", except no content is generated, this is ensured later
+										isIE = useragent.Contains("IE"); //Because Internet Explorer honestly does not implement caches correctly, "no-cache" does NOT mean "do not cache"
+										output = thispage.Get(querystring, message);
+										currentHash = (querystring + useragent + output).GetHashCode(); 
+										if (cache304.TryGetValue(ipaddress, out clientCache)) {
+											if (clientCache.Contains(currentHash)) {
+												code = "304";
+											} else {
+												clientCache.Add(currentHash);
+												Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
+											}
+										} else {
+											clientCache = new HashSet<int>(); //New user
+											clientCache.Add(currentHash);
+											cache304.Add(ipaddress, clientCache);
+											Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
+										}
+										break;
+									}
 								case 'p':
 								case 'P':
 									{
-										if (method2 == 'U') {
+										if (method2 == 'U' || method2 == 'u')
 											output = thispage.Put(querystring, message);
-											if (output != null) //as in, actually null
-												code = "200 Ok";
-										} else if (method2 == 'O') {
+										else if (method2 == 'O' || method2 == 'o')
 											output = thispage.Post(querystring, message);
-											if (output != null) //as in, actually null
-												code = "200 Ok";
-										}
 										break;
 									}
 								case 'd':
 								case 'D':
 									{
 										output = thispage.Delete(querystring, message);
-										if (output != null) //as in, actually null
-											code = "200 Ok";
 										break;
 									}
 								default:
-									code = "444";
+									code = "501";
+									break;
+							}
+							if (headers == thispage.Headers)
+								headers = "";
+							else {
+								const string contenttypeheader = "content-type:";
+								headers = "\r\n" + thispage.Headers; //Ensures at least one new line... yeah I know
+								foreach (string s in headers.Split('\n')) { //This has about a 50-100ns bottleneck, solution: forget about headers
+									if (s.ToLower().StartsWith(contenttypeheader)) {
+										contenttype = s.Substring(contenttypeheader.Length);
+										contenttype.Replace("\r", null);	//Remove the possible carriage return character
+										headers.Replace(s + '\n', null);	//Remove the entire content type line from the headers (or else there'll be double)
+									}
+								}
+							}
+						} else
+							headers = "";
+						#endregion
+						#region outputparse
+						int length = (output == null ? 0 : output.Length); //Ensures I don't null check an output that is null
+						if (code != "304" && length > 0) { //If we haven't generated a 304 or a nothing response
+							code = "200"; //Begin code as 200 for default success, but now include user HTTP codes
+							if (length >= 5 && //If the output is long enough to be xxx\r\n
+							    Char.IsDigit(output[0]) && //If the first three characters are digits
+							    Char.IsDigit(output[1]) &&
+							    Char.IsDigit(output[2]) &&
+							    output[3] == '\r' && //If these three digits end with a line breaker
+							    output[4] == '\n') {
+								code = output.Substring(0, 3); //Then we have the code
+								output = (length > 5) ? output.Substring(5, length - 5) : ""; 	//And we can remove it from the output
+								length = output.Length; //Update the length
+							}
+						}
+						#endregion
+						#region MIME
+						byte[] bytes = new byte[2]; //primitives begin as 0 equivalent
+						bool isGzip = false;//... or false 
+						if (length >= 2 && contenttype == "") {
+							bytes = Encoding.ASCII.GetBytes(output.ToCharArray(0, 2)); //Needs to be ASCII bytes, here ASCII info loss is preferable
+							//If length of the resultant output is greater MTU OR the first two bytes indicate some sort of GZIP/ZIP encoding
+							isGzip = ((bytes[0] == (char)0x1f) && (bytes[1] == (char)0x8b || bytes[1] == (char)0x3f)); //Gzip is NOT a mime type
+							contenttype = "text/plain";
+							switch (output[0]) { //mime/content type handling
+								case (char)0:
+									{
+										if (length > 3) {
+											if (output[0] == (char)0 && output[1] == (char)0 && output[2] == (char)1) {
+												contenttype = "image/x-icon";
+											}
+											if (length > 9 && "ftyp" == output.Substring(4, 4)) {
+												contenttype = "video/mp4";
+											}
+										}
+										break;
+									}
+								case '[':
+									{
+										if (output[length - 1] == ']')
+											contenttype = "application/json"; //As always, this framework promotes the use of JSON over CSV or XML or null terminated strings
+										break;
+									}
+								case '{'://0x7b
+									{
+										if (output[length - 1] == '}')
+											contenttype = "application/json";
+										break;
+									}
+								case '<'://0x3c
+									{
+										if (output[length - 1] == '>') {
+											if (length > 3 && output[2] == 'x') { //<?xm
+												contenttype = "text/xml";
+											} else
+												contenttype = "text/html";
+										}
+										break;
+									}
+								case '%'://0x25
+									{
+										if (length > 4 && (output.Substring(1, 3) == "PDF")) {
+											contenttype = "application/pdf";
+										}
+										break;
+									}
+
+								case (char)0x42:
+									{
+										if (output[1] == (char)0x4D) {
+											contenttype = "image/bmp";
+										}
+										break;
+									}
+								case (char)0x47:
+									{
+										if (output[1] == (char)0x49) {
+											contenttype = "image/gif";
+										}
+										break;
+									}
+								case (char)0x49:
+									{
+										if (output[1] == (char)0x44) {
+											contenttype = "audio/mpeg";
+										}
+										break;
+									}
+								case (char)0x4d:
+									{
+										if (output[1] == (char)0x54) {
+											contenttype = "audio/midi";
+										}
+										break;
+									}
+								case (char)0x4f:
+									{
+										if (output[1] == (char)0x67) {
+											contenttype = "audio/ogg";
+										}
+										break;
+									}
+								case (char)0x66:
+									{
+										if (output[1] == (char)0xfc) {
+											contenttype = "audio/flac";
+										}
+										break;
+									}
+								case (char)0x89:
+									{
+										if (output[1] == (char)0x50) {
+											contenttype = "image/png";
+										}
+										break;
+									}
+								case (char)0xff:
+									{
+										if (output[1] == (char)0xd8) {
+											contenttype = "image/jpeg";
+										} else if (output[1] == (char)0xfb) {
+											contenttype = "audio/mpeg";
+										}
+										break;
+									}
+								default:
+									contenttype = "text/plain";
 									break;
 							}
 						}
-
-
-						/*
-						builder.Append(HTTP).AppendLine(code); //Besides when impossible, explicitly adding "\n" is better than "appendline"
-						builder.Append("Server: FAP.NET ").Append(VERSION).Append(" Codename: M\r\n");
-						builder.Append("Date: ").Append(System.DateTime.UtcNow.ToString("R")).Append("\r\n");
-						builder.Append("Pragma: no-cache\r\n");
-						builder.Append("Connection: close\r\n");
-						builder.Append("Content-type: application/json; charset=us-ascii\r\n");
-						builder.Append("Cache-control: no-cache\r\n");
-						builder.Append("Content-Length: ").Append(output.Length).Append("\r\n");
-						builder.Append("\r\n");
-						*/
-
-						//I'm told that many append functions is only performant in loops
-						builder.Append(HTTP + code + "\r\n" +
-						"Server: FAP.NET " + VERSION + " Codename: Meisscanne\r\n" +
-						"Date: " + DateTime.UtcNow.ToString("R") + "\r\n" +
-						"Pragma: no-cache\r\n" +
-						"Connection: close\r\n" +
-						"Content-type: application/json; charset=us-ascii\r\n" +
-						"Cache-control: no-cache\r\n" +
-						"Content-Length: " + (output == null ? 0 : output.Length) + "\r\n\r\n"
-						);
-						//if (stream.CanWrite) //Apparently this does more than check a variable, so it's best to call this as late as possible
+						#endregion
+						#region httpcodeparser
 						switch (code[0]) {
+							case '1':
+								length = 0;
+								builder.Append(HTTP + H.S100 + headers + "\r\n\r\n");
+								break;
 							case '2':
-								builder.AppendLine(output + "\n" + BREAKER);
-								//builder.AppendLine(BREAKER);
-								stream.Write(Encoding.ASCII.GetBytes(builder.ToString()), 0, builder.Length);
-								break;
+								{
+									#region 2xx
+									switch (code[2]) {
+										case '0':
+											builder.Append(HTTP + H.S200);
+											break;
+										case '1':
+											builder.Append(HTTP + H.S201);
+											break;
+										case '2':
+											builder.Append(HTTP + H.S202);
+											break;
+										case '3':
+											builder.Append(HTTP + H.S203);
+											break;
+										case '4':
+											length = 0; //204 does not generate content
+											builder.Append(HTTP + H.S204);
+											break;
+										case '5':
+											builder.Append(HTTP + H.S205);
+											break;
+										case '6':
+											builder.Append(HTTP + H.S206);
+											break;
+										default:
+											{
+												builder.Append(HTTP + code);
+												break;
+											}
+									}
+									builder.Append(/*HTTP + CODE*/"\r\n" +
+									"Server: FAP.NET " + VERSION + " Codename: Meisscanne\r\n" +
+									"Date: " + DateTime.UtcNow.ToString("R") + "\r\n" +
+									"Connection: close\r\n" +
+									(length > 0 ? "Content-type: " + contenttype + "; charset=utf-8\r\n" : "") + //http://www.w3.org/Protocols/rfc2616/rfc2616-sec7.html#sec7.2.1
+									(headers.Length > 0 ? headers.Substring(2) + "\r\n" : "") +
+									"Cache-Control: private, max-age=" + CacheMaxAge + (isIE ? "" : ", no-cache") + ", must-revalidate\r\n" + //Cache control since 1.4
+									(method1 == 'g' || method1 == 'G' ? "ETag: \"" + String.Format("{0:x}", currentHash) + "\"\r\n" : "") +
+									(isGzip ? 
+											"Content-Encoding: gzip\r\nTransfer-Encoding: Chunked\r\n\r\n" : //If it seems GZIP is being sent, start chunking
+											(length < MTU ? 
+												"Content-Length: " + length + "\r\n\r\n" : "Transfer-Encoding: Chunked\r\n\r\n"))
+									);
+									break;
+									#endregion
+								}
 							case '3':
-								builder.AppendLine(BREAKER);
-								stream.Write(Encoding.ASCII.GetBytes(builder.ToString()), 0, builder.Length);
-								break;
+								{
+									#region 3xx
+									switch (code[2]) {
+										case '0':
+											builder.Append(HTTP + H.R300 + headers + "\r\n\r\n");
+											break;
+										case '1':
+											builder.Append(HTTP + H.R301 + headers + "\r\n\r\n");
+											break;
+										case '2':
+											builder.Append(HTTP + H.R302 + headers + "\r\n\r\n");
+											break;
+										case '3':
+											builder.Append(HTTP + H.R303 + headers + "\r\n\r\n");
+											break;
+										case '4':
+											length = 0;
+											builder.Append(HTTP + H.R304 + "\r\n" +
+											"Server: FAP.NET " + VERSION + " Codename: Meisscanne\r\n" +
+											"Date: " + DateTime.UtcNow.ToString("R") + "\r\n" +
+											"Connection: close\r\n" +
+											"Cache-control: private, max-age=" + CacheMaxAge + (isIE ? "" : ", no-cache") + ", must-revalidate\r\n" +
+											"ETag: \"" + String.Format("{0:x}", currentHash) + "\"\r\n\r\n");
+											break;
+										case '5':
+											builder.Append(HTTP + H.R305 + headers + "\r\n\r\n");
+											break;
+										case '6':
+											builder.Append(HTTP + H.R306 + headers + "\r\n\r\n");
+											break;
+										case '7':
+											builder.Append(HTTP + H.R307 + headers + "\r\n\r\n");
+											break;
+										case '8':
+											builder.Append(HTTP + H.R308 + headers + "\r\n\r\n");
+											break;
+										default:
+											builder.Append(HTTP + H.S200 + headers + "\r\n\r\n");
+											break;
+									}
+									break;
+									#endregion
+								}
 							case '4':
-								builder.AppendLine(BREAKER);
-								stream.Write(Encoding.ASCII.GetBytes(builder.ToString()), 0, builder.Length);
-								break;
+								{
+									#region 4xx
+									switch (code[1]) {
+										case '0':
+											switch (code[2]) {
+												case '0':
+													builder.Append(HTTP + H.E400 + headers + "\r\n\r\n");
+													break;
+												case '1':
+													builder.Append(HTTP + H.E401 + headers + "\r\n\r\n");
+													break;
+												case '2':
+													builder.Append(HTTP + H.E402 + headers + "\r\n\r\n");
+													break;
+												case '3':
+													builder.Append(HTTP + H.E403 + headers + "\r\n\r\n");
+													break;
+												case '4':
+													builder.Append(HTTP + H.E404 + headers + "\r\n\r\n");
+													break;
+												case '5':
+													builder.Append(HTTP + H.E405 + headers + "\r\n\r\n");
+													break;
+												case '6':
+													builder.Append(HTTP + H.E406 + headers + "\r\n\r\n");
+													break;
+												case '7':
+													builder.Append(HTTP + H.E407 + headers + "\r\n\r\n");
+													break;
+												case '8':
+													builder.Append(HTTP + H.E408 + headers + "\r\n\r\n");
+													break;
+												case '9':
+													builder.Append(HTTP + H.E409 + headers + "\r\n\r\n");
+													break;
+												default:
+													builder.Append(HTTP + H.E404 + headers + "\r\n\r\n");
+													break;
+
+											}
+											break;
+										case '1':
+											switch (code[2]) {
+												case '0':
+													builder.Append(HTTP + H.E410 + headers + "\r\n\r\n");
+													break;
+												case '1':
+													builder.Append(HTTP + H.E411 + headers + "\r\n\r\n");
+													break;
+												case '2':
+													builder.Append(HTTP + H.E412 + headers + "\r\n\r\n");
+													break;
+												case '3':
+													builder.Append(HTTP + H.E413 + headers + "\r\n\r\n");
+													break;
+												case '4':
+													builder.Append(HTTP + H.E414 + headers + "\r\n\r\n");
+													break;
+												case '5':
+													builder.Append(HTTP + H.E415 + headers + "\r\n\r\n");
+													break;
+												case '6':
+													builder.Append(HTTP + H.E416 + headers + "\r\n\r\n");
+													break;
+												case '7':
+													builder.Append(HTTP + H.E417 + headers + "\r\n\r\n");
+													break;
+												case '9':
+													builder.Append(HTTP + H.E419 + headers + "\r\n\r\n");
+													break;
+												default:
+													builder.Append(HTTP + H.E404 + headers + "\r\n\r\n");
+													break;
+											}
+											break;
+										case '2':
+											switch (code[2]) {
+												case '0':
+													builder.Append(HTTP + H.E420 + headers + "\r\n\r\n"); //For illegal reasons
+													break;
+												case '1':
+													builder.Append(HTTP + H.E421 + headers + "\r\n\r\n");
+													break;
+												default:
+													builder.Append(HTTP + H.E42x + headers + "\r\n\r\n");
+													break;
+											}
+											break;
+										case '3':
+											builder.Append(HTTP + H.E431 + headers + "\r\n\r\n");
+											break;
+										case '4':
+											builder.Append(H.E444 + "\r\n\r\n"); //A proper 444 report is JUST 444, nothing else
+											break;
+										case '5':
+											builder.Append(HTTP + H.E451 + headers + "\r\n\r\n"); //For legal reasons
+											break;
+										case '9':
+											switch (code[2]) {
+												case '5':
+													builder.Append(HTTP + H.E495 + headers + "\r\n\r\n");
+													break;
+												case '6':
+													builder.Append(HTTP + H.E496 + headers + "\r\n\r\n");
+													break;
+												case '7':
+													builder.Append(HTTP + H.E497 + headers + "\r\n\r\n");
+													break;
+												case '9':
+													builder.Append(HTTP + H.E499 + headers + "\r\n\r\n");
+													break;
+												default:
+													builder.Append(HTTP + H.E49x + headers + "\r\n\r\n");
+													break;
+											}
+											break;
+										default:
+											builder.Append(HTTP + H.E404 + headers + "\r\n\r\n");
+											break;
+										
+									}
+									break;
+									#endregion
+								}
+							case '5':
+								{
+									#region 5xx
+									length = 0;
+									switch (code[1]) {
+										case '0':
+											switch (code[2]) {
+												case '0':
+													builder.Append(HTTP + H.G500 + headers + "\r\n\r\n");
+													break;
+												case '1':
+													builder.Append(HTTP + H.G501 + headers + "\r\n\r\n");
+													break;
+												case '2':
+													builder.Append(HTTP + H.G502 + headers + "\r\n\r\n");
+													break;
+												case '3':
+													builder.Append(HTTP + H.G503 + headers + "\r\n\r\n");
+													break;
+												case '4':
+													length = 0;
+													builder.Append(HTTP + H.G504 + headers + "\r\n\r\n");
+													break;
+												case '5':
+													builder.Append(HTTP + H.G505 + headers + "\r\n\r\n");
+													break;
+												case '6':
+													builder.Append(HTTP + H.G506 + headers + "\r\n\r\n");
+													break;
+												default:
+													builder.Append(HTTP + H.G502 + headers + "\r\n\r\n");
+													break;
+											}
+											break;
+										default:
+											if (code == "511") {
+												builder.Append(HTTP + H.G502 + headers + "\r\n\r\n");
+												break;
+											} 
+											if (code == "520") {
+												builder.Append(HTTP + H.G502 + headers + "\r\n\r\n");
+												break;
+											}
+											break;
+									}
+									break;
+									#endregion
+								}
 							default:
-								const string defres = "404 Not Found" + BREAKER + BREAKER; // this should be both hidden and performantly const
-								stream.Write(Encoding.ASCII.GetBytes(defres), 0, defres.Length);
+								builder.Append(HTTP + code + "\r\n\r\n");
 								break;
 						}
+						#endregion
+						if (builder.Length > 0) {
+							if (method1 == 'h' || method1 == 'H')
+								length = 0; //Right at the very, very end, to ensure the response is otherwise identical
+							if (length < MTU) {
+								string towrite = builder + (length == 0 ? "" : (output + (isGzip ? "\r\n0\r\n" : "\r\n")));
+								stream.Write(Encoding.UTF8.GetBytes(towrite), 0, towrite.Length);
+							} else {
+								try {
+									string towrite;
+									int bytestowrite = 0;
+									stream.Write(Encoding.UTF8.GetBytes(builder.ToString()), 0, builder.Length); //First build the headers
+									for (int i = 0; i < length; i += MTU) {
+										bytestowrite = (length - i > MTU) ? MTU : length - i;
+										towrite = String.Format("{0:x}", bytestowrite) + "\r\n" + output.Substring(i, bytestowrite) + "\r\n";
+										stream.Write(Encoding.UTF8.GetBytes(towrite), 0, towrite.Length);
+									}
+								} catch (Exception e) {
+									Console.Error.WriteLine("04: " + e.Message);
+								}
+								stream.Write(Encoding.UTF8.GetBytes("0\r\n"), 0, 3); //Finish, magic bullet is that it doesn't matter what failed up there
+							}
+						} else {
+							const string towrite = HTTP + H.G501 + "\r\n\r\n";
+							stream.Write(Encoding.UTF8.GetBytes(towrite), 0, towrite.Length);
+						}
 					}
-					stream.Flush(); //Flush
-					stream.Close(); //Close
-					client.Close(); //Close
+					stream.Flush(); 
+					stream.Close();
+					client.Close(); 
 				}
 
 			} catch (Exception e) { 
-				Console.Error.WriteLine(DateTime.UtcNow + " That was a bad client \n\t\t" + client.ToString() + "\n" + e.ToString());   
-				ResetListener(true); //This stays as is since 90% of parse errors are the client's fault
+				Console.Error.WriteLine("05: " + DateTime.UtcNow + " That was a bad client \n\t\t" + client + "\n" + e);   
+				ResetListener(true);
 			}
+		}
+
+		async void CleanCache(HashSet<int> clientcache, string ipheaders, int hash)
+		{
+			await Task.Delay(CacheMaxAge);
+			if (clientcache != null && clientcache.Count > 0)
+				clientcache.Remove(hash);
+			if (clientcache.Count == 0)
+				cache304.Remove(ipheaders);
 		}
 
 		async void ResetListener(bool force = false)
@@ -400,20 +901,76 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				listener = new TcpListener(Address, Port);
 				listener.Server.NoDelay = NODELAY;
 				listener.Start();
-				//needsreset |= !force;
 				while (listenercount < SERVERCOOL) {
 					listenercount++;
 					listener.BeginAcceptTcpClient(ListenerCallback, listener);
 				}
 				if (!force) {
 					await Task.Delay(TimeSpan.FromMinutes(5));
-					Task.Factory.StartNew(() => ResetListener());
+					Task.Factory.StartNew(() => ResetListener()); //I do not wish to await this statement
 				}
 			} catch (Exception e) {
 				Console.Error.WriteLine("06: " + DateTime.UtcNow + " Reset Error: " + e.Message);
 			}
 		}
 
-
+		static class H
+		{
+			//Just a bunch of consts, returning from a page function with ###/r/n(rest of your message here) can be used for return codes
+			public const string S100 = "100 Continue";
+			public const string S200 = "200 Ok";
+			public const string S201 = "201 Created";
+			public const string S202 = "202 Accepted";
+			public const string S203 = "203 Non-Authoritative Information";
+			public const string S204 = "204 No Content";
+			public const string S205 = "205 Reset Content";
+			public const string S206 = "206 Partial Content";
+			public const string R300 = "300 Multiple Choices";
+			public const string R301 = "301 Moved Permanently";
+			public const string R302 = "302 Found";
+			public const string R303 = "303 See Other";
+			public const string R304 = "304 Not modified";
+			public const string R305 = "305 Use Proxy";
+			public const string R306 = "306 Switch Proxy";
+			public const string R307 = "307 Temporary Redirect";
+			public const string R308 = "308 Permanent Redirect";
+			public const string E400 = "400 Bad Request";
+			public const string E401 = "401 Unauthorized";
+			public const string E402 = "402 Payment Required";
+			public const string E403 = "403 Forbidden";
+			public const string E404 = "404 Not Found";
+			public const string E405 = "405 Method Not Allowed";
+			public const string E406 = "406 Not Acceptable";
+			public const string E407 = "407 Proxy Authentication Required";
+			public const string E408 = "408 Request Timeout";
+			public const string E409 = "409 Conflict";
+			public const string E410 = "410 Gone";
+			public const string E411 = "411 Length Required";
+			public const string E412 = "412 Precondition Failed";
+			public const string E413 = "413 Payload Too Large";
+			public const string E414 = "414 Request-URI Too Long";
+			public const string E415 = "415 Unsupported Media Type";
+			public const string E416 = "416 Requested Range Not Satisfiable";
+			public const string E417 = "417 Expectation Failed";
+			public const string E419 = "419 Authentication Timeout";
+			public const string E420 = "420 It's Time";
+			public const string E421 = "421 Misdirected Request";
+			public const string E42x = "42x Strange error";
+			public const string E431 = "431 Request Header Fields Too Large";
+			public const string E444 = "444";
+			public const string E451 = "451 Unavailable For Legal Reasons";
+			public const string E495 = "495 Cert Error";
+			public const string E496 = "496 No Cert";
+			public const string E497 = "497 HTTP to HTTPS";
+			public const string E499 = "499 Client Closed Request";
+			public const string E49x = "49x Unhandled front-end server error";
+			public const string G500 = "500 Internal Server Error";
+			public const string G501 = "501 Not Implemented";
+			public const string G502 = "502 Bad Gateway";
+			public const string G503 = "503 Service Unavailable";
+			public const string G504 = "504 Gateway Timeout";
+			public const string G505 = "505 HTTP Version Not Supported";
+			public const string G506 = "506 Variant Also Negotiates";
+		}
 	}
 }
