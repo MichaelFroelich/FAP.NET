@@ -18,7 +18,7 @@ Thread.Sleep(-1);           // Sleep until a user arrives
 
 Q: I absolute must return a very certain HTTP return code! HOW?
 
-A: For example, the following will return the code "204" along with the client headers after navigating to the page 127.0.0.1:1024/header?somethingherethatsnotblank:
+A: For example, the following will return the code "201" along with the client headers after navigating to the page 127.0.0.1:1024/header?somethingherethatsnotblank:
 ```
       Page page = new Page("header");
 			page.get = (a, b) => {
@@ -27,7 +27,7 @@ A: For example, the following will return the code "204" along with the client h
 			pagelist.Add(page);
 			Server server = new Server(pagelist);
 ```
-  I've implemented a wide range of http return codes (please read the source code for the full list (at the very bottom of the Server.cs file)), although you may have to build your own headers. Because the use of which headers against which return codes can be highly contentious, I've decided not to force any headers except in the use of 200, 404 and 304.
+  I've implemented a wide range of http return codes (please read the source code for the full list (at the very bottom of the Server.cs file)), although you may have to build your own headers. Because the use of which headers against which return codes can be highly contentious, I've decided not to force any headers except in the use of 20x codes, 404 and 304.
 
 Q: Do headers work both ways? If so, how do I add a specific header?
 
