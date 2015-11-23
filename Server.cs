@@ -16,7 +16,6 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
-using System.IO;
 
 namespace FAP //Functional active pages , Functional programming And Pages, Free API Production, FAP seems like a good name!
 {
@@ -247,20 +246,22 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			}
 		}
 
-		void Parse(TcpClient client)
+		async void Parse(TcpClient client)
 		{
 			char input;
 			char method1;
 			char method2;
 			string code = "404"; //404 fail safe
 			string message;
+			string ipaddress = null;
 			string output = null;
-			string querystring = "";
-			string path = "";
-			string contenttype = "";
-			string headers = "";
-			string useragent = "";
+			string querystring = string.Empty;
+			string path = string.Empty;
+			string contenttype = string.Empty;
+			string headers = string.Empty;
+			string useragent = string.Empty;
 			int currentHash = -1;
+			int contentlength = -1;
 			bool isIE = false;
 			HashSet<int> clientCache = null;
 			StringBuilder builder = new StringBuilder();
@@ -273,6 +274,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				//using (var reader = new StreamReader(stream))//using (var writer = new StreamWriter(stream)) 
 				using (var stream = client.GetStream()) {//In the end, the reward for only using one stream is immeasurable				
 					//if (/*stream.DataAvailable && */stream.CanRead && stream.CanWrite) {
+
 					if (stream.CanRead) {
 						#region inputparser
 						method1 = (char)stream.ReadByte(); //G
@@ -297,7 +299,6 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						} while (!(input == '\uffff' || input == '\r')/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
 						querystring = builder.ToString();
 						builder.Clear();
-						string ipaddress = null;
 						while (stream.DataAvailable) { 
 							input = (char)stream.ReadByte();
 							headerbuilder.Append(input);
@@ -307,22 +308,23 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									case '\r':
 										stream.ReadByte(); //Trims the '\n'
 										goto NoMoreHeaders; //Virtually the only way how to jump out of a switch within a control loop
+										break;
 									case 'X':
 									case 'x': //Find x-IP style headers
 										while (input != ':') {
 											builder.Append(input);
 											input = (char)stream.ReadByte();
 										}
-										const string x4rd4 = "x-forwarded-for";
-										const string xreal = "x-real-ip";
+										const string x4rd4 = "X-Forwarded-For";
+										const string xreal = "X-Real-IP";
 										var ipstring = builder.ToString();
-										if (ipstring.ToLower() == x4rd4 || //In the desperate attempt to ensure HTTP compatibility
-										    ipstring.ToLower() == xreal) {
+										if (ipstring == x4rd4 || //In the desperate attempt to ensure HTTP compatibility
+										    ipstring == xreal) {
 											headerbuilder.Append(builder);
 											builder.Clear();
 											headerbuilder.Append(":" + (char)stream.ReadByte()); //Trims the space
 											input = (char)stream.ReadByte();
-											while (input != '\r' && input != ',' && stream.DataAvailable) { //gets the first ip address (ie ipadd1, ipadd2,
+											while (input != '\r' && input != ',') { //gets the first ip address (ie ipadd1, ipadd2,
 												builder.Append(input);
 												input = (char)stream.ReadByte();
 											}
@@ -337,9 +339,9 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 											builder.Append(input);
 											input = (char)stream.ReadByte();
 										}
-										const string useragentheader = "user-agent";
+										const string useragentheader = "User-Agent";
 										var useragentstring = builder.ToString();
-										if (useragentstring.ToLower() == useragentheader) {
+										if (useragentstring == useragentheader) {
 											builder.Clear();
 											input = (char)stream.ReadByte();
 											while (input != '\r') { //Read until the new line
@@ -370,16 +372,28 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						message = Encoding.UTF8.GetString(utf8bytes.ToArray());
 						#endregion
 						#region PageProcessor
+						Page staticpage; //Static data remains untouched
 						if (querystring.Length > MTU) {
 							code = "414"; //If the query string turns out to be greater than the MTU, generate an URI too big error
-							headers = "";
+							headers = string.Empty;
 						} else if (headers.Length > MTU) {
 							code = "431"; //If the query string turns out to be greater than the MTU, generate an URI too big error
-							headers = "";
-						} else if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out thispage)) {
-							thispage.Headers = headers; //Page variables
+							headers = string.Empty;
+						} else if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out staticpage)) {
+							thispage = (Page)Activator.CreateInstance(staticpage.GetType());
+							//Functions
+							thispage.get = staticpage.get;
+							thispage.put = staticpage.put;
+							thispage.post = staticpage.post;
+							thispage.delete = staticpage.delete;
+							//For polymorphics
+							thispage.Headers = headers;
 							thispage.UserIP = ipaddress;
 							thispage.UserAgent = useragent;
+							//For functionals
+							staticpage.Headers = headers;
+							staticpage.UserIP = ipaddress;
+							staticpage.UserAgent = useragent;
 							switch (method1) {
 								case 'h':
 								case 'H': //Head
@@ -387,36 +401,42 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								case 'G': //Get
 									{		//"HEAD" is identical to "GET", except no content is generated, this is ensured later
 										isIE = useragent.Contains("IE"); //Because Internet Explorer honestly does not implement caches correctly, "no-cache" does NOT mean "do not cache"
-										output = thispage.Get(querystring, message);
-										currentHash = (querystring + useragent + output).GetHashCode(); 
-										if (cache304.TryGetValue(ipaddress, out clientCache)) {
-											if (clientCache.Contains(currentHash)) {
-												code = "304";
+										output = await Task.FromResult<string>(thispage.Get(querystring, message));
+										currentHash = (querystring + ipaddress + useragent + output).GetHashCode(); 
+										try {
+											if (cache304.TryGetValue(ipaddress, out clientCache)) {
+												if (clientCache.Contains(currentHash)) {
+													code = "304";
+												} else {
+													clientCache.Add(currentHash);
+													Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
+												}
 											} else {
+												clientCache = new HashSet<int>(); //New user
 												clientCache.Add(currentHash);
+												cache304.Add(ipaddress, clientCache);
 												Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
 											}
-										} else {
-											clientCache = new HashSet<int>(); //New user
-											clientCache.Add(currentHash);
-											cache304.Add(ipaddress, clientCache);
-											Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
+											break;
+										} catch { 
+											Console.Error.WriteLine("06: " + DateTime.UtcNow + " caching error from " + ipaddress + " " + useragent + "\t\nAre you benchmarking or under attack?");   
+											code = "503";
 										}
-										break;
 									}
+									break;
 								case 'p':
 								case 'P':
 									{
 										if (method2 == 'U' || method2 == 'u')
-											output = thispage.Put(querystring, message);
+											output = await Task.FromResult<string>(thispage.Put(querystring, message));
 										else if (method2 == 'O' || method2 == 'o')
-											output = thispage.Post(querystring, message);
+											output = await Task.FromResult<string>(thispage.Post(querystring, message));
 										break;
 									}
 								case 'd':
 								case 'D':
 									{
-										output = thispage.Delete(querystring, message);
+										output = await Task.FromResult<string>(thispage.Delete(querystring, message));
 										break;
 									}
 								default:
@@ -424,7 +444,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									break;
 							}
 							if (headers == thispage.Headers)
-								headers = "";
+								headers = string.Empty;
 							else {
 								const string contenttypeheader = "content-type:";
 								headers = "\r\n" + thispage.Headers; //Ensures at least one new line... yeah I know
@@ -437,7 +457,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								}
 							}
 						} else
-							headers = "";
+							headers = string.Empty;
 						#endregion
 						#region outputparse
 						int length = (output == null ? 0 : output.Length); //Ensures I don't null check an output that is null
@@ -450,7 +470,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							    output[3] == '\r' && //If these three digits end with a line breaker
 							    output[4] == '\n') {
 								code = output.Substring(0, 3); //Then we have the code
-								output = (length > 5) ? output.Substring(5, length - 5) : ""; 	//And we can remove it from the output
+								output = (length > 5) ? output.Substring(5, length - 5) : string.Empty; 	//And we can remove it from the output
 								length = output.Length; //Update the length
 							}
 						}
@@ -458,7 +478,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						#region MIME
 						byte[] bytes = new byte[2]; //primitives begin as 0 equivalent
 						bool isGzip = false;//... or false 
-						if (length >= 2 && contenttype == "") {
+						if (length >= 2 && contenttype == string.Empty) {
 							bytes = Encoding.ASCII.GetBytes(output.ToCharArray(0, 2)); //Needs to be ASCII bytes, here ASCII info loss is preferable
 							//If length of the resultant output is greater MTU OR the first two bytes indicate some sort of GZIP/ZIP encoding
 							isGzip = ((bytes[0] == (char)0x1f) && (bytes[1] == (char)0x8b || bytes[1] == (char)0x3f)); //Gzip is NOT a mime type
@@ -612,10 +632,10 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									"Server: FAP.NET " + VERSION + " Codename: Meisscanne\r\n" +
 									"Date: " + DateTime.UtcNow.ToString("R") + "\r\n" +
 									"Connection: close\r\n" +
-									(length > 0 ? "Content-type: " + contenttype + "; charset=utf-8\r\n" : "") + //http://www.w3.org/Protocols/rfc2616/rfc2616-sec7.html#sec7.2.1
-									(headers.Length > 0 ? headers.Substring(2) + "\r\n" : "") +
-									"Cache-Control: private, max-age=" + CacheMaxAge + (isIE ? "" : ", no-cache") + ", must-revalidate\r\n" + //Cache control since 1.4
-									(method1 == 'g' || method1 == 'G' ? "ETag: \"" + String.Format("{0:x}", currentHash) + "\"\r\n" : "") +
+									(length > 0 ? "Content-type: " + contenttype + "; charset=utf-8\r\n" : string.Empty) + //http://www.w3.org/Protocols/rfc2616/rfc2616-sec7.html#sec7.2.1
+									(headers.Length > 0 ? headers.Substring(2) + "\r\n" : string.Empty) +
+									"Cache-Control: private, max-age=" + CacheMaxAge + (isIE ? string.Empty : ", no-cache") + ", must-revalidate\r\n" + //Cache control since 1.4
+									(method1 == 'g' || method1 == 'G' ? "ETag: \"" + String.Format("{0:x}", currentHash) + "\"\r\n" : string.Empty) +
 									(isGzip ? 
 											"Content-Encoding: gzip\r\nTransfer-Encoding: Chunked\r\n\r\n" : //If it seems GZIP is being sent, start chunking
 											(length < MTU ? 
@@ -646,7 +666,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 											"Server: FAP.NET " + VERSION + " Codename: Meisscanne\r\n" +
 											"Date: " + DateTime.UtcNow.ToString("R") + "\r\n" +
 											"Connection: close\r\n" +
-											"Cache-control: private, max-age=" + CacheMaxAge + (isIE ? "" : ", no-cache") + ", must-revalidate\r\n" +
+											"Cache-control: private, max-age=" + CacheMaxAge + (isIE ? string.Empty : ", no-cache") + ", must-revalidate\r\n" +
 											"ETag: \"" + String.Format("{0:x}", currentHash) + "\"\r\n\r\n");
 											break;
 										case '5':
@@ -850,7 +870,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							if (method1 == 'h' || method1 == 'H')
 								length = 0; //Right at the very, very end, to ensure the response is otherwise identical
 							if (length < MTU) {
-								string towrite = builder + (length == 0 ? "" : (output + (isGzip ? "\r\n0\r\n" : "\r\n")));
+								string towrite = builder + (length == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n")));
 								stream.Write(Encoding.UTF8.GetBytes(towrite), 0, towrite.Length);
 							} else {
 								try {
@@ -878,7 +898,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				}
 
 			} catch (Exception e) { 
-				Console.Error.WriteLine("05: " + DateTime.UtcNow + " That was a bad client \n\t\t" + client + "\n" + e);   
+				Console.Error.WriteLine("05: " + DateTime.UtcNow + " That was a bad client  " + ipaddress + " " + useragent + e);   
 				ResetListener(true);
 			}
 		}
