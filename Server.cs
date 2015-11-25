@@ -31,7 +31,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		//If the connection count falls below this level, quickly make a lot more
 		const string HTTP = "HTTP/1.1 ";
 		//This causes issues if set to anything greater or lesser (excluding 1.0)
-		const string VERSION = "1.6";
+		const string VERSION = "1.7";
 		//Current version
 		const int TIMEOUT = 5;
 		//Send and receive timeout
@@ -460,7 +460,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							headers = string.Empty;
 						#endregion
 						#region outputparse
-						int length = (output == null ? 0 : output.Length); //Ensures I don't null check an output that is null
+						int length = (output == null ? 0 : Encoding.UTF8.GetByteCount(output)); //Ensures I don't null check an output that is null
 						if (code != "304" && length > 0) { //If we haven't generated a 304 or a nothing response
 							code = "200"; //Begin code as 200 for default success, but now include user HTTP codes
 							if (length >= 5 && //If the output is long enough to be xxx\r\n
@@ -471,7 +471,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							    output[4] == '\n') {
 								code = output.Substring(0, 3); //Then we have the code
 								output = (length > 5) ? output.Substring(5, length - 5) : string.Empty; 	//And we can remove it from the output
-								length = output.Length; //Update the length
+								length = Encoding.UTF8.GetByteCount(output); //Update the length
 							}
 						}
 						#endregion
