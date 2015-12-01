@@ -231,17 +231,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
 					Parse(c);								//This makes the assumption you're already in a unique thread
 				}
-				if (listenercount < SERVERWARM) {
-					Task.Factory.StartNew(Listen);
-					if (listenercount < SERVERWARM) {
-						Task.Factory.StartNew(Listen);
-						if (listenercount < SERVERWARM) {
-							Task.Factory.StartNew(Listen);
-						}
-						Thread.Yield(); //yielding here, as necessary work is competing against unnecesssary work (exiting this function)
-					}
-					Thread.Yield();
-				}
+				Task.Factory.StartNew(Listen);
 			} catch { //This does hide errors... but even Apache and NGINX reset their listeners, so should we and it's always going to throw errors
 				//Console.Error.WriteLine("03: " + DateTime.UtcNow + " Callback error, probably just resetting but specifically: " + e.Message);
 			}
