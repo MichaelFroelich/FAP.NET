@@ -1,4 +1,4 @@
-/*
+﻿/*
 				GNU GENERAL PUBLIC LICENSE
 		                   Version 3, 29 June 2007
 
@@ -16,6 +16,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
+using System.IO;
 
 namespace FAP //Functional active pages , Functional programming And Pages, Free API Production, FAP seems like a good name!
 {
@@ -252,7 +253,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			char method1;
 			char method2;
 			string code = "404"; //404 fail safe
-			string message;
+			string message = string.Empty;
 			string ipaddress = null;
 			string output = null;
 			string querystring = string.Empty;
@@ -260,8 +261,8 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			string contenttype = string.Empty;
 			string headers = string.Empty;
 			string useragent = string.Empty;
+			long contentlength = -1;
 			int currentHash = -1;
-			int contentlength = -1;
 			bool isIE = false;
 			HashSet<int> clientCache = null;
 			StringBuilder builder = new StringBuilder();
@@ -299,7 +300,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						} while (!(input == '\uffff' || input == '\r')/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
 						querystring = builder.ToString();
 						builder.Clear();
-						while (stream.DataAvailable) { 
+						while (input != '\uffff') { 
 							input = (char)stream.ReadByte();
 							headerbuilder.Append(input);
 							if (input == '\n') { 				//Ensures we only check after a new line
@@ -365,9 +366,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						if (ipaddress == null) { //Next best guess for the ip address
 							ipaddress = (((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString()); 
 						}
+						//int integerinput =;
 						List<byte> utf8bytes = new List<byte>();
-						while (stream.DataAvailable) {
-							utf8bytes.Add((byte)stream.ReadByte());
+						while (stream.DataAvailable) { //For Mono/.NET compatibility this must be used instead of if -1/uffff
+							utf8bytes.Add((byte)stream.ReadByte());	//Networkstreams have strange behaviour at the end of their streams
+							//integerinput = stream.ReadByte();
 						}
 						message = Encoding.UTF8.GetString(utf8bytes.ToArray());
 						#endregion
@@ -870,17 +873,16 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							if (method1 == 'h' || method1 == 'H')
 								length = 0; //Right at the very, very end, to ensure the response is otherwise identical
 							if (length < MTU) {
-								string towrite = builder + (length == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n")));
-								stream.Write(Encoding.UTF8.GetBytes(towrite), 0, towrite.Length);
+								var towrite = Encoding.UTF8.GetBytes(builder + (length == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n"))));
+								stream.Write(towrite, 0, towrite.Length);
 							} else {
 								try {
-									string towrite;
 									int bytestowrite = 0;
 									stream.Write(Encoding.UTF8.GetBytes(builder.ToString()), 0, builder.Length); //First build the headers
 									for (int i = 0; i < length; i += MTU) {
 										bytestowrite = (length - i > MTU) ? MTU : length - i;
-										towrite = String.Format("{0:x}", bytestowrite) + "\r\n" + output.Substring(i, bytestowrite) + "\r\n";
-										stream.Write(Encoding.UTF8.GetBytes(towrite), 0, towrite.Length);
+										var towrite = Encoding.UTF8.GetBytes(String.Format("{0:x}", bytestowrite) + "\r\n" + output.Substring(i, bytestowrite) + "\r\n");
+										stream.Write(towrite, 0, towrite.Length);
 									}
 								} catch (Exception e) {
 									Console.Error.WriteLine("04: " + e.Message);
