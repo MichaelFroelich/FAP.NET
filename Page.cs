@@ -1,4 +1,4 @@
-/*
+﻿/*
 				GNU GENERAL PUBLIC LICENSE
 		                   Version 3, 29 June 2007
 
@@ -10,6 +10,12 @@
  */
 
 using System;
+using FAP;
+using System.Linq.Expressions;
+using System.Reflection.Emit;
+using System.Net.Sockets;
+using System.Runtime.Remoting.Metadata.W3cXsd2001;
+using System.Reflection;
 
 namespace FAP //Change this name!
 {
@@ -44,6 +50,13 @@ namespace FAP //Change this name!
 		public string UserAgent { get; set; }
 
 		/// <summary>
+		/// Initializes a new instance of the <see cref="FAP.Page"/> class.
+		/// </summary>
+		public Page() //Simple for now
+		{
+		}
+
+		/// <summary>
 		/// Initializes a new instance of the <see cref="FAP.Page"/> class. Construct by passing through a string that represents the path to this page, ie localhost/api? where "api" is the path name. You do not need to include either a forward slash or a question mark, simply the path name
 		/// </summary>
 		/// <param name="path">Path to this page as a string, without a terminator or forward slash</param>
@@ -51,6 +64,7 @@ namespace FAP //Change this name!
 		{
 			Path = path;
 		}
+
 
 		/// <summary>
 		/// Set a function which will be called when accessing this page through a "get" HTTP method.
@@ -127,5 +141,6 @@ namespace FAP //Change this name!
 			}
 			return null;
 		}
+
 	}
 }
