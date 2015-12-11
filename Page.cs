@@ -11,11 +11,6 @@
 
 using System;
 using FAP;
-using System.Linq.Expressions;
-using System.Reflection.Emit;
-using System.Net.Sockets;
-using System.Runtime.Remoting.Metadata.W3cXsd2001;
-using System.Reflection;
 
 namespace FAP //Change this name!
 {
