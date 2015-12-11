@@ -459,7 +459,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							{		//"HEAD" is identical to "GET", except no content is generated, this is ensured later
 								isIE = useragent.Contains("IE"); //Because Internet Explorer honestly does not implement caches correctly, "no-cache" does NOT mean "do not cache"
 								output = await Task.FromResult<string>(thispage.Get(querystring, message));
-								currentHash = (querystring + ipaddress + useragent + output).GetHashCode(); 
+								currentHash = (querystring + ipaddress + useragent).GetHashCode() + output.GetHashCode(); //After a bit of thought, I'd rather call the GetHashCode function twice than concatenate a potentially large string
 								try {
 									if (cache304.TryGetValue(ipaddress, out clientCache)) {
 										if (clientCache.Contains(currentHash)) {
