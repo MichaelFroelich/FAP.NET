@@ -435,7 +435,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					ipaddress = (((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString()); 
 				}
 				if (contentlength > 0) { //if there's something to read
-					byte[] bytesreceived = new byte[contentlength + 1];
+					byte[] bytesreceived = new byte[contentlength];
 					for (int i = 0; i < int.MaxValue; i += int.MaxValue) {
 						var bytestoread = (contentlength - i > int.MaxValue) ? int.MaxValue : contentlength - i;
 						client.Client.Receive(bytesreceived, (int)bytestoread, 0);
