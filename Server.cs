@@ -26,13 +26,13 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 	public class Server
 	{
 		/* Constants */
-		const int SERVERWARM = 1500;
-		//Have a maximum of this many connections possible
-		const int SERVERCOOL = 251;
-		//If the connection count falls below this level, quickly make a lot more
+		const int SERVERWARM = 21000;
+		//Have a maximum of this many connections possible, set at 21000 as of 1.0.9
+		const int SERVERCOOL = 7000;
+		//If the connection count falls below this level, quickly make a lot more, set at 7000 as of 1.0.9 as it's the highest expected RPS
 		const string HTTP = "HTTP/1.1 ";
 		//This causes issues if set to anything greater or lesser (excluding 1.0)
-		const string VERSION = "1.8";
+		const string VERSION = "1.0.9";
 		//Current version
 		const int TIMEOUT = 5;
 		//Send and receive timeout
@@ -50,7 +50,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		//The queue
 		Dictionary<string, Page> pagelist;
 		//Where all the pages are kept
-		Dictionary<string, HashSet<int>> cache304;
+		//Dictionary<string, HashSet<int>> cache304;
 
 		//List<IAsyncResult> listenerlist; //This has... no way of actually workin
 		//bool ever = true;
@@ -103,16 +103,16 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			get;
 			set;
 		}
-
+		/*
 		/// <summary>
-		/// Gets or sets the cache's max age.
+		/// Gets or sets the cache's max age. Comment: No longer implemented as no longer physically caching
 		/// </summary>
 		/// <value>The cache's max age.</value>
 		public int CacheMaxAge {
 			get;
 			set;
 		}
-
+		*/
 		/// <summary>
 		/// Gets or sets the Maximum Transmission Unit, used for determining whether to user chunked transfer encoding or not. Note, if you're using this framework as intended (proxied through NGINX or Apache), your static webserver/proxy may chunk anyway. 
 		/// </summary>
@@ -195,10 +195,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			address = IPAddress.Parse(IpAddress);
 			this.port = port;
 			QueryCharacter = '?';
-			CacheMaxAge = 31536000; //About an hour
+			//CacheMaxAge = 31536000; //About an hour
 			MTU = mtu; // Essentially the current MTU max
 			listener = new TcpListener(Address, Port);
-			cache304 = new Dictionary<string, HashSet<int>>();
+
+			//cache304 = new Dictionary<string, HashSet<int>>();
 			listener.Server.NoDelay = NODELAY; 
 			listener.Start();
 			if (inList != null)
@@ -225,15 +226,14 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 
 		async void Listen()
 		{
+			if (listenercount > SERVERCOOL) {		//If there's less than SC listeners, it's a good idea to create more
+				do {
+					await Task.Yield();				//There is no thread
+				} while (listener.Pending());		//Do not spawn whilst the server is being spammed, reserve the ticks for processing
+			}
 			try {
 				listenercount++;
-				if (listenercount > SERVERCOOL) {		//If there's less than SC listeners, it's a good idea to create more
-					do {
-						//Thread.Yield(); 				//Yielding informs the system to do something else, ultimately unnecessary as I delay next
-						await Task.Delay(50); 			//This basically means "check back in 50ms," it doesn't actually delay/suspend anything
-					} while (listener.Pending());		//Do not spawn whilst the server is being spammed, reserve the ticks for processing
-				}
-				listener.BeginAcceptTcpClient(ListenerCallback, listener); //second param may be listener or just null
+				listener.BeginAcceptTcpClient(ListenerCallback, listener);
 			} catch (Exception e) {
 				Console.Error.WriteLine("02: " + DateTime.UtcNow + " Listener error: " + e.Message);
 				if (!listener.Server.IsBound) {
@@ -250,7 +250,6 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		{
 			try {
 				using (var c = listener.EndAcceptTcpClient(result)) {
-				
 					listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
 					Parse(c);								//This makes the assumption you're already in a unique thread
 				}
@@ -281,16 +280,21 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			string code = "404"; //404 fail safe
 			string message = string.Empty;
 			string ipaddress = null;
-			string output = null;
+			string output = string.Empty;
 			string querystring = string.Empty;
 			string path = string.Empty;
 			string contenttype = string.Empty;
 			string headers = string.Empty;
 			string useragent = string.Empty;
+			string requestEtag = string.Empty;
 			long contentlength = -1;
 			int currentHash = -1;
-			bool isIE = false;
-			HashSet<int> clientCache = null;
+			int outputbytelength;
+			bool isCacheable = false;
+			bool isGzip = false;
+			
+			//bool isIE = false;
+			//HashSet<int> clientCache = null;
 			StringBuilder builder = new StringBuilder();
 			StringBuilder headerbuilder = new StringBuilder(); 
 			Page thispage;
@@ -315,10 +319,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					else {
 						builder.Append(input);
 					}
-				} while (!(input == '\uffff' || input == '\r')/*!char.IsControl(input) && input != '\uffff'*/);//input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
+				} while (input != '\r');/*!char.IsControl(input) && input != '\uffff'*///input != '\n' && input != '\r' && input != '\uffff' && input != '\0');
 				querystring = builder.ToString();
 				builder.Clear();
-				while (input != '\uffff') { 
+				
+				while (input != '\uffff') { //Searching for -1 only really works if we're not reading a header of importance, don't worry, i'm working on a more secure loop
 					input = (char)ReadAByte(client.Client);
 					headerbuilder.Append(input);
 					if (input == '\n') { 				//Ensures we only check after a new line
@@ -327,6 +332,29 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							case '\r':
 								ReadAByte(client.Client);
 								goto NoMoreHeaders; //Virtually the only way how to jump out of a switch within a control loop
+								break;
+							case 'I':
+								while (input != ':') {
+									builder.Append(input);
+									input = (char)ReadAByte(client.Client);
+								}
+								const string ifnonematchheader = "If-None-Match";
+								var ifnonematchstring = builder.ToString();
+								if (ifnonematchstring == ifnonematchheader) {
+									builder.Clear();
+									input = (char)ReadAByte(client.Client);
+									while (input != '"') { //Read until '"' all FAP Etags are in the format "wxyzabcd" with leading zeroes if necessary
+										input = (char)ReadAByte(client.Client); //This way we can negate any weak/strong etag differentials
+									}
+									byte[] hexstringbytes = new byte[8]; //As of 1.9, we know for certain that the etag strings are 8 characters
+									client.Client.Receive(hexstringbytes, 8, 0);
+									requestEtag = Encoding.UTF8.GetString(hexstringbytes);
+									client.Client.Receive(hexstringbytes, 2, 0); //Throw away the next '"' and '\r', but leave the linefeed
+									headerbuilder.Append("If-None-Match: received"); //Etag hidden due to abuse potential
+								} else {
+									headerbuilder.Append(builder); //Continue on for other 'I' headers
+									headerbuilder.Append(':');
+								}
 								break;
 							case 'X':
 								while (input != ':') {
@@ -388,7 +416,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 										input = (char)ReadAByte(client.Client);
 									}
 									contentlength = long.Parse(builder.ToString());
-									headerbuilder.Append("Content-Length: " + useragent);
+									headerbuilder.Append("Content-Length: " + contentlength);
 								} else {
 									headerbuilder.Append(builder);
 									headerbuilder.Append(':');
@@ -401,15 +429,13 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						}
 					} 
 				}
-
 				NoMoreHeaders:
 				headers = headerbuilder.ToString();
 				if (ipaddress == null) { //Next best guess for the ip address
 					ipaddress = (((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString()); 
 				}
-				
 				if (contentlength > 0) { //if there's something to read
-					byte[] bytesreceived = new byte[contentlength];
+					byte[] bytesreceived = new byte[contentlength + 1];
 					for (int i = 0; i < int.MaxValue; i += int.MaxValue) {
 						var bytestoread = (contentlength - i > int.MaxValue) ? int.MaxValue : contentlength - i;
 						client.Client.Receive(bytesreceived, (int)bytestoread, 0);
@@ -421,18 +447,16 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					while ((bytestoread = client.Client.Available) > 0) { //By this time, all the data has been received so we can just expect to read all
 						byte[] bytesreceived = new byte[bytestoread]; //whilst assigning data is expensive, I changed this code with the assumption that system calls are more expensive. See my blog
 						client.Client.Receive(bytesreceived, (int)bytestoread, 0);
-						foreach (byte b in bytesreceived)
-							utf8bytes.Add(b);
+						utf8bytes.AddRange(bytesreceived);
 					}
 					message = Encoding.UTF8.GetString(utf8bytes.ToArray());
 				}
-				
 				#endregion
 				#region PageProcessor
 				Page staticpage; //Static data remains untouched
 				if (querystring.Length > MTU) {
 					code = "414"; //If the query string turns out to be greater than the MTU, generate an URI too big error
-					headers = string.Empty;
+					headers = string.Empty; //Necessary, as otherwise the framework will append the request headers on error
 				} else if (headers.Length > MTU) {
 					code = "431"; //If the query string turns out to be greater than the MTU, generate an URI too big error
 					headers = string.Empty;
@@ -457,14 +481,18 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						case 'g':
 						case 'G': //Get
 							{		//"HEAD" is identical to "GET", except no content is generated, this is ensured later
-								isIE = useragent.Contains("IE"); //Because Internet Explorer honestly does not implement caches correctly, "no-cache" does NOT mean "do not cache"
+								isCacheable = true;
 								output = await Task.FromResult<string>(thispage.Get(querystring, message));
-								currentHash = (querystring + ipaddress + useragent).GetHashCode() + output.GetHashCode(); //After a bit of thought, I'd rather call the GetHashCode function twice than concatenate a potentially large string
-								try {
+								currentHash = querystring.GetHashCode() + ipaddress.GetHashCode() + useragent.GetHashCode() + output.GetHashCode();
+								//Tested with a C# stopwatch, performing GetHashCode multiple times is indeed A LOT faster than concatenation, please ignore the integer overflows behind the curtain
+								if (requestEtag == String.Format("{0:x8}", currentHash)) //String.Format is slightly faster than int.Parse
+									code = "304"; //304 generation in three lines!
+								/*
+								try { //I'll keep this code, maybe to paste into a task later, in case I realise I do need to stores hashes
 									if (cache304.TryGetValue(ipaddress, out clientCache)) {
 										if (clientCache.Contains(currentHash)) {
 											code = "304";
-										} else {
+										} else { //&& ifnonematch != String.Empty() &&  String.Format("{0:x}", currentHash) != ifnonematch
 											clientCache.Add(currentHash);
 											Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
 										}
@@ -478,7 +506,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								} catch { 
 									Console.Error.WriteLine("07: " + DateTime.UtcNow + " caching error from " + ipaddress + " " + useragent + "\t\nAre you benchmarking or under attack?");   
 									code = "503";
-								}
+								}*/
 							}
 							break;
 						case 'p':
@@ -517,140 +545,141 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					headers = string.Empty;
 				#endregion
 				#region outputparse
-				int length = (output == null ? 0 : Encoding.UTF8.GetByteCount(output)); //Ensures I don't null check an output that is null
-				if (code != "304" && length > 0) { //If we haven't generated a 304 or a nothing response
+				if (code != "304" && !string.IsNullOrEmpty(output)) { //If we haven't generated a 304 or a nothing response
 					code = "200"; //Begin code as 200 for default success, but now include user HTTP codes
-					if (length >= 5 && //If the output is long enough to be xxx\r\n
+					if (output.Length >= 5 && //Using the string length, not UTF8 length here as we're doing string operations
 					    Char.IsDigit(output[0]) && //If the first three characters are digits
 					    Char.IsDigit(output[1]) &&
 					    Char.IsDigit(output[2]) &&
 					    output[3] == '\r' && //If these three digits end with a line breaker
 					    output[4] == '\n') {
 						code = output.Substring(0, 3); //Then we have the code
-						output = (length > 5) ? output.Remove(0, 5) : string.Empty; 	//And we can remove it from the output
-						length = Encoding.UTF8.GetByteCount(output); //Update the length
+						output = (output.Length > 5) ? output.Remove(0, 5) : string.Empty; 	//And we can remove it from the output
 					}
-				}
-				#endregion
-				#region MIME
-				byte[] bytes = new byte[2]; //primitives begin as 0 equivalent
-				bool isGzip = false;//... or false 
-				if (length >= 2 && contenttype == string.Empty) {
-					bytes = Encoding.Unicode.GetBytes(output.ToCharArray(0, 2)); //Unicode seems to work best when translating actual data to bytes
-					//If length of the resultant output is greater MTU OR the first two bytes indicate some sort of GZIP/ZIP encoding
-					isGzip = ((bytes[0] == (char)0x1f) && (bytes[1] == (char)0x8b || bytes[1] == (char)0x3f)); //Gzip is NOT a mime type
-					contenttype = "text/plain";
-					switch (output[0]) { //mime/content type handling
-						case (char)0:
-							{
-								if (length > 3) {
-									if (output[0] == (char)0 && output[1] == (char)0 && output[2] == (char)1) {
-										contenttype = "image/x-icon";
+					outputbytelength = Encoding.UTF8.GetByteCount(output);
+					if (contenttype == string.Empty) { //If the contenttype is undefined
+						contenttype = "text/plain";
+						if (output.Length >= 2) { //If we have the bytes to sniff for a content type
+							var bytes = Encoding.Unicode.GetBytes(output.ToCharArray(0, 2)); //Unicode seems to work best when translating actual data to bytes
+							//If length of the resultant output is greater MTU OR the first two bytes indicate some sort of GZIP/ZIP encoding
+							isGzip = ((bytes[0] == (char)0x1f) && (bytes[1] == (char)0x8b || bytes[1] == (char)0x3f)); //Gzip is NOT a mime type
+							switch (output[0]) { //mime/content type handling
+								case (char)0:
+									{
+										if (output.Length > 3) { //Throughout this entire if block it's performing string manipuation, therefore output.Lenght is needed
+											if (output[0] == (char)0 && output[1] == (char)0 && output[2] == (char)1) {
+												contenttype = "image/x-icon";
+											}
+											if (output.Length > 9 && "ftyp" == output.Substring(4, 4)) {
+												contenttype = "video/mp4";
+											}
+										}
+										break;
 									}
-									if (length > 9 && "ftyp" == output.Substring(4, 4)) {
-										contenttype = "video/mp4";
-									}
-								}
-								break;
-							}
-						case '[':
-							{
-								if (output[output.Length - 1] == ']') //output.Length != length, length is for writing only
+								case '[':
+									{
+										if (output[output.Length - 1] == ']') //output.Length != length, length is for writing only
 									contenttype = "application/json"; //As always, this framework promotes the use of JSON over CSV or XML or null terminated strings
-								break;
-							}
-						case '{'://0x7b
-							{
-								if (output[output.Length - 1] == '}')
-									contenttype = "application/json";
-								break;
-							}
-						case '<'://0x3c
-							{
-								if (output[output.Length - 1] == '>') {
-									if (length > 3 && output[2] == 'x') { //<?xm
-										contenttype = "text/xml";
-									} else
-										contenttype = "text/html";
-								}
-								break;
-							}
-						case '%'://0x25
-							{
-								if (length > 4 && (output.Substring(1, 3) == "PDF")) {
-									contenttype = "application/pdf";
-								}
-								break;
-							}
+										break;
+									}
+								case '{'://0x7b
+									{
+										if (output[output.Length - 1] == '}')
+											contenttype = "application/json";
+										break;
+									}
+								case '<'://0x3c
+									{
+										if (output[output.Length - 1] == '>') {
+											if (outputbytelength > 3 && output[2] == 'x') { //<?xm
+												contenttype = "text/xml";
+											} else
+												contenttype = "text/html";
+										}
+										break;
+									}
+								case '%'://0x25
+									{
+										if (output.Length > 4 && (output.Substring(1, 3) == "PDF")) {
+											contenttype = "application/pdf";
+										}
+										break;
+									}
 
-						case (char)0x42:
-							{
-								if (output[1] == (char)0x4D) {
-									contenttype = "image/bmp";
-								}
-								break;
+								case (char)0x42:
+									{
+										if (output[1] == (char)0x4D) {
+											contenttype = "image/bmp";
+										}
+										break;
+									}
+								case (char)0x47:
+									{
+										if (output[1] == (char)0x49) {
+											contenttype = "image/gif";
+										}
+										break;
+									}
+								case (char)0x49:
+									{
+										if (output[1] == (char)0x44) {
+											contenttype = "audio/mpeg";
+										}
+										break;
+									}
+								case (char)0x4d:
+									{
+										if (output[1] == (char)0x54) {
+											contenttype = "audio/midi";
+										}
+										break;
+									}
+								case (char)0x4f:
+									{
+										if (output[1] == (char)0x67) {
+											contenttype = "audio/ogg";
+										}
+										break;
+									}
+								case (char)0x66:
+									{
+										if (output[1] == (char)0xfc) {
+											contenttype = "audio/flac";
+										}
+										break;
+									}
+								case (char)0x89:
+									{
+										if (output[1] == (char)0x50) {
+											contenttype = "image/png";
+										}
+										break;
+									}
+								case (char)0xff:
+									{
+										if (output[1] == (char)0xd8) {
+											contenttype = "image/jpeg";
+										} else if (output[1] == (char)0xfb) {
+											contenttype = "audio/mpeg";
+										}
+										break;
+									}
+								default:
+									if (isGzip)
+										contenttype = "application/x-gzip"; //Send this type if Gziped
+									break;
 							}
-						case (char)0x47:
-							{
-								if (output[1] == (char)0x49) {
-									contenttype = "image/gif";
-								}
-								break;
-							}
-						case (char)0x49:
-							{
-								if (output[1] == (char)0x44) {
-									contenttype = "audio/mpeg";
-								}
-								break;
-							}
-						case (char)0x4d:
-							{
-								if (output[1] == (char)0x54) {
-									contenttype = "audio/midi";
-								}
-								break;
-							}
-						case (char)0x4f:
-							{
-								if (output[1] == (char)0x67) {
-									contenttype = "audio/ogg";
-								}
-								break;
-							}
-						case (char)0x66:
-							{
-								if (output[1] == (char)0xfc) {
-									contenttype = "audio/flac";
-								}
-								break;
-							}
-						case (char)0x89:
-							{
-								if (output[1] == (char)0x50) {
-									contenttype = "image/png";
-								}
-								break;
-							}
-						case (char)0xff:
-							{
-								if (output[1] == (char)0xd8) {
-									contenttype = "image/jpeg";
-								} else if (output[1] == (char)0xfb) {
-									contenttype = "audio/mpeg";
-								}
-								break;
-							}
-						default:
-							contenttype = "text/plain";
-							break;
+						}
 					}
-				}
+					
+				} else
+					outputbytelength = 0;
+					
 				#endregion
 				#region httpcodeparser
 				switch (code[0]) {
 					case '1':
-						length = 0;
+						outputbytelength = 0;
 						builder.Append(HTTP + H.S100 + headers + "\r\n\r\n");
 						break;
 					case '2':
@@ -670,7 +699,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									builder.Append(HTTP + H.S203);
 									break;
 								case '4':
-									length = 0; //204 does not generate content
+									outputbytelength = 0; //204 does not generate content
 									builder.Append(HTTP + H.S204);
 									break;
 								case '5':
@@ -680,27 +709,32 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									builder.Append(HTTP + H.S206);
 									break;
 								default:
-									{
-										builder.Append(HTTP + code);
-										break;
-									}
+									builder.Append(HTTP + code);
+									break;
 							}
 							builder.Append(String.Format(
 								"\r\nServer: FAP.NET {0} Codename: Meisscanne\r\n" +
 								"Date: {1}\r\n" +
 								"Connection: close\r\n{2}{3}" +
-								"Cache-Control: private, max-age={4}, must-revalidate\r\n{5}{6}"
-							, VERSION,
+								//"Expires: {1}\r\n" +
+								//"Cache-Control: private, max-age={4}, must-revalidate\r\n{5}{6}", 
+								"Cache-Control: private, max-age=0, must-revalidate\r\n" +
+								"{4}", 
+								VERSION,
 								DateTime.UtcNow.ToString("R"),
-								(length > 0 ? "Content-type: " + contenttype + "; charset=utf-8\r\n" : string.Empty),
+								(outputbytelength > 0 ? "Content-type: " + contenttype + "; charset=utf-8\r\n" : string.Empty),
 								(headers.Length > 0 ? headers.Substring(2) + "\r\n" : string.Empty),
-								CacheMaxAge + (isIE ? string.Empty : ", no-cache"),
-								(method1 == 'g' || method1 == 'G' ? "ETag: \"" + String.Format("{0:x}", currentHash) + "\"\r\n" : string.Empty),
-								(isGzip ? 
-					"Content-Encoding: gzip\r\nTransfer-Encoding: Chunked\r\n\r\n" : //If it seems GZIP is being sent, start chunking
-					(length < MTU ? 
-						"Content-Length: " + length + "\r\n\r\n" : "Transfer-Encoding: Chunked\r\n\r\n"))
+								//CacheMaxAge + (isIE ? string.Empty : ", no-cache"),
+								(isCacheable ? "ETag: \"" + String.Format("{0:x8}", currentHash) + "\"\r\n" : string.Empty)
 							));
+							if (isGzip) {
+								builder.Append("Content-Encoding: gzip\r\nTransfer-Encoding: Chunked\r\n\r\n");
+							} else {
+								if (outputbytelength < MTU) {
+									builder.Append("Content-Length: " + outputbytelength + "\r\n\r\n");
+								} else
+									builder.Append("Transfer-Encoding: Chunked\r\n\r\n");
+							}
 							break;
 							#endregion
 						}
@@ -721,14 +755,20 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									builder.Append(HTTP + H.R303 + headers + "\r\n\r\n");
 									break;
 								case '4':
-									length = 0;
+									outputbytelength = 0;
 									builder.Append(HTTP + H.R304 + String.Format("\r\n" +
 									"Server: FAP.NET {0} Codename: Meisscanne\r\n" +
 									"Date: {1}\r\n" +
 									"Connection: close\r\n" +
-									"Cache-control: private, max-age={2}, must-revalidate\r\n" +
-									"ETag: \"{3}\"\r\n\r\n",
-										VERSION, DateTime.UtcNow.ToString("R"), CacheMaxAge + (isIE ? string.Empty : ", no-cache"), String.Format("{0:x}", currentHash)));
+									//"Expires: {1}\r\n" +
+									//"Expires: -1\r\n" +
+									//"Cache-control: private, max-age={2}, must-revalidate\r\n" +
+									"Cache-control: private, max-age=0, must-revalidate\r\n" +
+									"ETag: \"{2}\"\r\n\r\n",
+										VERSION, 
+										DateTime.UtcNow.ToString("R"), 
+										//CacheMaxAge + (isIE ? string.Empty : ", no-cache"), 
+										String.Format("{0:x8}", currentHash)));
 									break;
 								case '5':
 									builder.Append(HTTP + H.R305 + headers + "\r\n\r\n");
@@ -877,7 +917,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					case '5':
 						{
 							#region 5xx
-							length = 0;
+							outputbytelength = 0;
 							switch (code[1]) {
 								case '0':
 									switch (code[2]) {
@@ -894,7 +934,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 											builder.Append(HTTP + H.G503 + headers + "\r\n\r\n");
 											break;
 										case '4':
-											length = 0;
+											outputbytelength = 0;
 											builder.Append(HTTP + H.G504 + headers + "\r\n\r\n");
 											break;
 										case '5':
@@ -929,18 +969,18 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				#endregion
 				if (builder.Length > 0) {
 					if (method1 == 'h' || method1 == 'H')
-						length = 0; //Right at the very, very end, to ensure the response is otherwise identical
-					if (length < MTU) {
-						var towrite = Encoding.UTF8.GetBytes(builder + (length == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n"))));
+						outputbytelength = 0; //Right at the very, very end, to ensure the response is otherwise identical
+					if (outputbytelength < MTU) {
+						byte[] towrite = Encoding.UTF8.GetBytes(builder + (outputbytelength == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n"))));
 						client.Client.Send(towrite, towrite.Length, 0);//stream.Write(towrite, 0, towrite.Length);
 					} else {
 						try {
 							int bytestowrite = 0;
 							//stream.Write(Encoding.UTF8.GetBytes(builder.ToString()), 0, builder.Length); //First build the headers
-							var towrite = Encoding.UTF8.GetBytes(builder.ToString());
+							byte[] towrite = Encoding.UTF8.GetBytes(builder.ToString());
 							client.Client.Send(towrite, towrite.Length, 0);
-							for (int i = 0; i < length; i += MTU) {
-								bytestowrite = (length - i > MTU) ? MTU : length - i;
+							for (int i = 0; i < outputbytelength; i += MTU) {
+								bytestowrite = (outputbytelength - i > MTU) ? MTU : outputbytelength - i;
 								towrite = Encoding.UTF8.GetBytes(String.Format("{0:x}", bytestowrite) + "\r\n" + output.Substring(i, bytestowrite) + "\r\n");
 								//stream.Write(towrite, 0, towrite.Length);
 								client.Client.Send(towrite, towrite.Length, 0);
@@ -961,11 +1001,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				//client.Close(); 
 
 			} catch (Exception e) { 
-				Console.Error.WriteLine("05: " + DateTime.UtcNow + " That was a bad client  " + ipaddress + " " + useragent + e);   
+				Console.Error.WriteLine("05: " + DateTime.UtcNow + " That was a bad client  " + ipaddress + " " + useragent + "\n" + e);   
 				ResetListener(true);
 			}
 		}
-
+		/*
 		async void CleanCache(HashSet<int> clientcache, string ipheaders, int hash)
 		{
 			await Task.Delay(CacheMaxAge);
@@ -974,7 +1014,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			if (clientcache.Count == 0)
 				cache304.Remove(ipheaders);
 		}
-
+*/
 		async void ResetListener(bool force = false)
 		{
 			try {
@@ -984,7 +1024,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				listener = new TcpListener(Address, Port);
 				listener.Server.NoDelay = NODELAY;
 				listener.Start();
-				while (listenercount < SERVERCOOL) {
+				while (listenercount < SERVERWARM) {
 					listenercount++;
 					listener.BeginAcceptTcpClient(ListenerCallback, listener);
 				}
