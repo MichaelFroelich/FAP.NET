@@ -1,4 +1,4 @@
-﻿/*
+/*
 				GNU GENERAL PUBLIC LICENSE
 		                   Version 3, 29 June 2007
 
@@ -10,7 +10,7 @@
  */
 
 using System;
-using FAP;
+using System.Text;
 
 namespace FAP //Change this name!
 {
@@ -23,14 +23,14 @@ namespace FAP //Change this name!
 		/// Gets the initial path of your api URL, ie localhost/api? where "api" is the path name. You do not need to include either a forward slash or a question mark, simply the path name
 		/// </summary>
 		/// <value>as a string</value>
-		public string Path{ protected set; get; }
+		public string Path { protected set; get; }
 
 		/// <summary>
 		/// When "got"; are the headers sent from the client machine to the server with the user's HTTP version as the first line (mostly separated by \r\n). When "set"; are extra headers from the server to the client, generally ended in \r\n for each new line.
 		/// Do not modify the headers if you do not wish to add additional headers, just leave it as is. Hint; use Split('\n') and use a case/switch on the first character of each resultant string
 		/// </summary>
 		/// <value>The headers.</value>
-		public string Headers{ get; set; }
+		public string Headers { get; set; }
 
 		/// <summary>
 		/// The user's IP address as a string, setting this value does nothing.
@@ -62,31 +62,31 @@ namespace FAP //Change this name!
 
 
 		/// <summary>
-		/// Set a function which will be called when accessing this page through a "get" HTTP method.
+		/// Set a function which will be called when accessing this page through a "get" HTTP method. Return using Encoding.BigEndianUnicode for binary files (no warranties, no guarantees).
 		/// </summary>
 		/// <value>The get function</value>
-		public Func<string, string, string> get{ get; set; }
+		public Func<string, string, string> get { get; set; }
 
 		/// <summary>
 		/// Set a function which will be called when accessing this page through a "put" HTTP method.
 		/// </summary>
 		/// <value>The put function</value>
-		public Func<string, string, string> put{ get; set; }
+		public Func<string, string, string> put { get; set; }
 
 		/// <summary>
 		/// Set a function which will be called when accessing this page through a "post" HTTP method.
 		/// </summary>
 		/// <value>The post function</value>
-		public Func<string, string, string> post{ get; set; }
+		public Func<string, string, string> post { get; set; }
 
 		/// <summary>
 		/// Set a function which will be called when accessing this page through a "delete" HTTP method.
 		/// </summary>
 		/// <value>The delete function</value>
-		public Func<string, string, string> delete{ get; set; }
+		public Func<string, string, string> delete { get; set; }
 
 		/// <summary>
-		/// Override this for "object oriented" behaviour of defining the get function for this page.
+		/// Override this for "object oriented" behaviour of defining the get function for this page. Return using Encoding.BigEndianUnicode for binary files (no warranties, no guarantees).
 		/// </summary>
 		/// <param name="queryString">Other commands used in the url string, ie /api?command1.command2.other. It's recommended you terminate with a '.' symbol</param>
 		/// <param name="messageContent">IP address as a pain text string, then a new line ('\n'), then the message body content found after the carriage return after the HTTP headers</param>
