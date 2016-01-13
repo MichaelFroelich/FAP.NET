@@ -373,15 +373,14 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									if (method1 == '\0') { //First line condition
 										method1 = header[0];
 										method2 = header[1];
-										var httpversionindex = header.Length - 9;
 										var spaceindex = header.LastIndexOf(' ');
 										var pagefinderindex = header.IndexOf('/') + 1;
 										var querycharacterindex = header.IndexOf(QueryCharacter, pagefinderindex) + 1;
-										if (querycharacterindex > 1 && querycharacterindex < httpversionindex) { //incase the query character is 'H', 'T', 'P', '1', '2', '.', or '/'
+										if (querycharacterindex > 1 && querycharacterindex <= spaceindex) { //incase the query character is 'H', 'T', 'P', '1', '2', '.', or '/'
 											path = header.Substring(pagefinderindex, querycharacterindex - pagefinderindex - 1);
 											querystring = header.Substring(querycharacterindex, spaceindex - querycharacterindex);
 										}
-										header = header.Substring(httpversionindex, 8); //Gets the HTTP version
+										header = header.Substring(spaceindex + 1, (header.Length - spaceindex) - 1); //Gets the HTTP version
 									}
 									break;/*
 								case 'C': //Content-Length might not be possible
