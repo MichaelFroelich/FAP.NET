@@ -27,6 +27,9 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		//Have a maximum of this many connections possible, set at 21000 as of 1.0.9
 		const int SERVERWARM = 21000;
 
+		//When reading for headers, retry this amount of times before giving up
+		const int READRETRIES = 500;
+
 		//If the connection count falls below this level, quickly make a lot more, set at 7000 as of 1.0.9 as it's the highest expected RPS
 		// const int SERVERCOOL = 700;
 
@@ -352,11 +355,15 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				#region inputparser
 				byte[] bytesreceived = new byte[READBUFFER]; //whilst assigning data is expensive, I changed this code with the assumption that system calls are more expensive. See my blog
 				long bytestoread = 0;
-				//int retryread = 0;
+				int retryread = 0;
 				string header;
 				int seek = 0;
 				while (true) {
 					while ((bytestoread = client.Available) <= 0) {
+						if (retryread++ > READRETRIES) {
+							code = "444"; //Return 444, since it's probably something malicious
+							goto HeadersDone;
+						}
 					} //The idea behind polling, instead of grabbing all data through async methods, is to process headers whilst data is still being received
 					if (bytestoread > READBUFFER)
 						bytestoread = READBUFFER;
