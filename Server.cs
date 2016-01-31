@@ -467,6 +467,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					headers = string.Empty;
 				} else if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out staticpage)) {
 					thispage = (Page)Activator.CreateInstance(staticpage.GetType());
+					thispage.Path = staticpage.Path;
 					//Functions
 					thispage.get = staticpage.get;
 					thispage.put = staticpage.put;
