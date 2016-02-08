@@ -57,7 +57,7 @@ A: As of later versions, there are more features accessible to developers who ov
 	public class FrontPage : Page
 	{
 		public FrontPage()
-			: base("frontpage")
+			: base("api")
 		{
 		}
 	}
