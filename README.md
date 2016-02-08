@@ -20,12 +20,12 @@ Q: I absolute must return a very certain HTTP return code! HOW?
 
 A: For example, the following will return the code "201" along with the client headers after navigating to the page 127.0.0.1:1024/header?somethingherethatsnotblank:
 ```
-      Page page = new Page("header");
-			page.get = (a, b) => {
-				return "201\r\n" + page.Headers;
-			};
-			pagelist.Add(page);
-			Server server = new Server(pagelist);
+	Page page = new Page("header");
+	page.get = (a, b) => {
+		return "201\r\n" + page.Headers;
+	};
+	pagelist.Add(page);
+	Server server = new Server(pagelist);
 ```
   I've implemented a wide range of http return codes (please read the source code for the full list (at the very bottom of the Server.cs file)), although you may have to build your own headers. Because the use of which headers against which return codes can be highly contentious, I've decided not to force any headers except in the use of 20x codes, 404 and 304.
 
@@ -33,14 +33,14 @@ Q: Do headers work both ways? If so, how do I add a specific header?
 
 A: Yes, I've implemented headers both way. Again, the best way to demonstrate this is through example code:
 ```
-      Page page = new Page("cookiepage");
-			page.get = (a, b) => {
-			  if(!page.Headers.Contains("Cookie"))
-			    page.Headers = "Set-Cookie: " + (UserIP + UserAgent + DateTime.Now).GetHashCode();
-				return "200\r\n";
-			};
-			pagelist.Add(page);
-			Server server = new Server(pagelist);
+	Page page = new Page("cookiepage");
+	page.get = (a, b) => {
+	  if(!page.Headers.Contains("Cookie"))
+	    page.Headers = "Set-Cookie: " + (UserIP + UserAgent + DateTime.Now).GetHashCode();
+		return "200\r\n";
+	};
+	pagelist.Add(page);
+	Server server = new Server(pagelist);
 ```
   Furthermore, if you wish to return multiple headers, you may, just remember to separate each of them by ending each new line of headers with \r\n. The last header should not end with \r\n. Personally, I disagree with the use of cookies and cannot recommend anyone use cookies ever, but if you really must then feel free to do so.
   
@@ -49,6 +49,21 @@ A: Yes, I've implemented headers both way. Again, the best way to demonstrate th
 Q: The cache isn't working with *my extremely obscure browser here*!
 
 A: Yeah, caching can get a bit tricky (for this I am sorry), which is a good reason this library should remain GPL, this way if it's really an issue you may change the caching logic yourself or simply remove the cache altogether. Internet Explorer implements "no-cache" not as "please re-validate each time regardless of age" but instead it replicates the usage of "no-store", which is specifically not what the RFC standard specifies. That being said, I'm 99% sure Firefox and Chrome/Chromium both cache correctly.
+
+Q: How to override the Page class?
+
+A: As of later versions, there are more features accessible to developers who override the Page class than those who use a Page object's get/put/post methods. The simple boilerplate for an overridden class is:
+```
+	public class FrontPage : Page
+	{
+		public FrontPage()
+			: base("frontpage")
+		{
+		}
+	}
+```
+From here on in, you may override the Get, Put, Post and Delete methods (uppercase), or even simply assign functions in the constructor, which may be reassigned later freely. Please note; the lowercase methods will not be functional if the uppercase methods have been overriden, unfortunately this flaw is written into the design of FAP.
+
 
 Q: Why ```Thread.Sleep(-1)```?
 
