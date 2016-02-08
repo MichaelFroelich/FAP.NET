@@ -54,11 +54,18 @@ Q: How to override the Page class?
 
 A: As of later versions, there are more features accessible to developers who override the Page class than those who use a Page object's get/put/post methods. The simple boilerplate for an overridden class is:
 ```
-	public class FrontPage : Page
+	public class TestPage : Page
 	{
-		public FrontPage()
-			: base("api")
+		public TestPage()
 		{
+			//this is called when a client connects
+			//avoid a lot of code here
+		}
+
+		public TestPage(string a)
+			: base(a)
+		{
+			//this is called once on start up
 		}
 	}
 ```
