@@ -16,7 +16,7 @@ Thread.Sleep(-1);           // Sleep until a user arrives
 ```
 For extra documentation, download FAP via Nuget: 
 ```Install-Package FAP.dll ```
-And use the XML style documentation.
+and use the XML style documentation via MonoDevelop or Visual Studio
 
 # Q/A
 
