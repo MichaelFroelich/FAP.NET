@@ -69,9 +69,17 @@ A: As of later versions, there are more features accessible to developers who ov
 			//this is called once on start up
 		}
 	}
+	
 ```
 From here on in, you may override the Get, Put, Post and Delete methods (uppercase), or even simply assign functions in the constructor, which may be reassigned later freely. Please note; the lowercase methods will not be functional if the uppercase methods have been overriden, unfortunately this flaw is written into the design of FAP.
 
+As a recommendation, use two constructors: one intended to be run when loading pages onto FAP, another when a new user connects. That being said, using a singular constructor will work just as well if you need to keep code lines down. For example:
+```	
+	public TestPage()
+		: base("path")
+	{
+	}
+```
 
 Q: Why ```Thread.Sleep(-1)```?
 
