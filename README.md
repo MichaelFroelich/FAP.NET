@@ -14,6 +14,9 @@ var server = new Server();   // Create a new instance of the server
 server.AddPage(page);        // Load your page onto the server
 Thread.Sleep(-1);           // Sleep until a user arrives
 ```
+For extra documentation, download FAP via Nuget: 
+```Install-Package FAP.dll ```
+And use the XML style documentation.
 
 # Q/A
 
