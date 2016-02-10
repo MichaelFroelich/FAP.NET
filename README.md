@@ -1,5 +1,6 @@
 # FAP.NET
 Website: http://michaelfroelich.com
+Donations: http://michaelfroelich.com/products.html
 
 If you found this library framework useful, wish to demonstrate your gratitude or just want to brighten my day, feel free to donate from my website! Lastly, please contact me through Github or on my website or shoot me an email if there are any issues.
 
