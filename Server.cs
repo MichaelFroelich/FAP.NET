@@ -15,6 +15,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace FAP //Functional active pages , Functional programming And Pages, Free API Production, FAP seems like a good name!
 {
@@ -23,12 +24,15 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 	/// </summary>
 	public class Server
 	{
+		
+
 		/* Constants */
 		//Have a maximum of this many connections possible, set at 21000 as of 1.0.9
 		const int SERVERWARM = 21000;
 
-		//When reading for headers, retry this amount of times before giving up
-		const int READRETRIES = 500;
+		//When reading for headers, retry this amount of times before giving up and returning 444
+		//Unused in favour of using the timeout variable from the socket, throws an exception caught and then responded to with 444
+		//const int READRETRIES = 10000;
 
 		//If the connection count falls below this level, quickly make a lot more, set at 7000 as of 1.0.9 as it's the highest expected RPS
 		// const int SERVERCOOL = 700;
@@ -40,23 +44,21 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		const string HTTP = "HTTP/1.1 ";
 
 		//current FAP version,
-		const string VERSION = "1.1.0";
+		const string VERSION = "1.1.1";
 
-		//Timeout, currently unused
-		// const int TIMEOUT = 5;
+		//Timeout for both send and receive
+		const int TIMEOUT = 32;
 
 		//Nagle no delay thing, leave as "true" for more efficient chunking
 		const bool NODELAY = true;
 
+		//Default value for CacheMaxAge, an hour, used to determine session variable timeout
+		const int CACHEMAXAGEDEFAULT = 3600000;
+
 		//Read buffer, best left between 1024 to 8192
 		const int READBUFFER = 8192;
-		/* State booleans */
-		//bool needsreset = true;
-		//Used to reset the listeners every 5 minutes (remember, Apache and NGINX do this too!)
-		/* Other private variables */
-		// int listenercount = 0;
 
-		//Used to count how many listeners are active
+		//The only socket
 		Socket listener;
 
 		//the main listener, will be duplicated in later versions, perhaps for added speed
@@ -112,16 +114,17 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			set;
 		}
 
-		/*
-        /// <summary>
-		/// Gets or sets the cache's max age. Comment: No longer implemented as no longer physically caching
+		
+		/// <summary>
+		/// Gets or sets the maximum age of a cached page, such that page instances will remain in memory for a maximum of this amount of time,
+		/// provided that the page is not accessed by a client user.
 		/// </summary>
-		/// <value>The cache's max age.</value>
+		/// <value>The page cache's max age in milliseconds. Default is an hour (3600000 milliseconds)</value>
 		public int CacheMaxAge {
 			get;
 			set;
 		}
-		*/
+
 
 		/// <summary>
 		/// Gets or sets the Maximum Transmission Unit, used for determining whether to use chunked transfer encoding or not. Note, if you're using this framework as intended (proxied through NGINX or Apache), your static webserver/proxy may chunk anyway.
@@ -138,19 +141,23 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		/// <param name="p">Pages, single pages</param>
 		public void AddPage(Page p)
 		{
-			if (p != null)
+			if (p != null) {
+				Page.SetStatic(p);
 				pagelist.Add(p.Path, p);
+			}
 		}
 
 		/// <summary>
 		/// Adds a list of pages
 		/// </summary>
-		/// <param name="inList">A list or array of page through IEnumerable.</param>
+		/// <param name="inList">A list or array of pages through any container implementing IEnumerable.</param>
 		public void AddPage(IEnumerable<Page> inList)
 		{
 			foreach (Page p in inList)
-				if (p != null)
+				if (p != null) {
+					Page.SetStatic(p);
 					pagelist.Add(p.Path, p);
+				}
 		}
 
 		/// <summary>
@@ -166,7 +173,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		/// <summary>
 		/// Removes a list of pages
 		/// </summary>
-		/// <param name="inList">A list or array of page through IEnumerable.</param>
+		/// <param name="inList">A list or array of pages through any container implementing IEnumerable.</param>
 		public void RemovePage(IEnumerable<Page> inList)
 		{
 			foreach (Page p in inList)
@@ -204,22 +211,26 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			address = IPAddress.Parse(IpAddress);
 			this.port = port;
 			QueryCharacter = '?';
-			//CacheMaxAge = 31536000; //About an hour
+			CacheMaxAge = CACHEMAXAGEDEFAULT; //About an hour 3600000
 			MTU = mtu; // Essentially the current MTU max
 			listener = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);//new TcpListener(Address, Port);
 			//cache304 = new Dictionary<string, HashSet<int>>();
 			listener.NoDelay = NODELAY;
 			listener.Bind(new IPEndPoint(address, port));
 			listener.Listen(SOCKETBACKLOG);
+			listener.ReceiveTimeout = TIMEOUT;
+			listener.SendTimeout = TIMEOUT;
 			if (inList != null)
 				foreach (Page p in inList)
-					if (p != null)
+					if (p != null) {
+						Page.SetStatic(p);
 						pagelist.Add(p.Path, p);
+					}
 			LoadListeners();
 			//Task.Factory.StartNew(() => ResetListener()); //Calls LoadListeners
 		}
 
-		public void LoadListeners()
+		void LoadListeners()
 		{
 
 			//while (listenercount < SERVERWARM) //Calling the following code multiple times still provides a proven benefit through benchmarking
@@ -233,7 +244,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			//}
 		}
 
-		public void CallBack(object sender, SocketAsyncEventArgs eve)
+		void CallBack(object sender, SocketAsyncEventArgs eve)
 		{/*
 			try {*/
 			Parse(eve.AcceptSocket);
@@ -339,6 +350,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			//long contentlength = long.MinValue;
 			int currentHash = -1;
 			int outputbytelength;
+			int hashsum;
 			bool isCacheable = false;
 			bool isGzip = false;
 			Encoding encoder = Encoding.UTF8; //Used to switch between UTF8 and BigEndianUnicode for a last ditch attempt at binary safety
@@ -348,6 +360,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			StringBuilder inputheaderbuilder = new StringBuilder();
 			List<byte> utf8bytes = new List<byte>(); //Used for a whole number of times I read/write with utf8
 			Page thispage;
+			Page staticpage;
 			//client.NoDelay = NODELAY; //This is actually pointless after the connection has been opened, set on the TcpListener.Server instead
 			/*if (!client.Poll(1000, SelectMode.SelectRead))
 				return;*/
@@ -355,15 +368,10 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				#region inputparser
 				byte[] bytesreceived = new byte[READBUFFER]; //whilst assigning data is expensive, I changed this code with the assumption that system calls are more expensive. See my blog
 				long bytestoread = 0;
-				int retryread = 0;
 				string header;
 				int seek = 0;
 				while (true) {
 					while ((bytestoread = client.Available) <= 0) {
-						if (retryread++ > READRETRIES) {
-							code = "444"; //Return 444, since it's probably something malicious
-							goto HeadersDone;
-						}
 					} //The idea behind polling, instead of grabbing all data through async methods, is to process headers whilst data is still being received
 					if (bytestoread > READBUFFER)
 						bytestoread = READBUFFER;
@@ -386,6 +394,9 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 										if (querycharacterindex > 1 && querycharacterindex <= spaceindex) { //incase the query character is 'H', 'T', 'P', '1', '2', '.', or '/'
 											path = header.Substring(pagefinderindex, querycharacterindex - pagefinderindex - 1);
 											querystring = header.Substring(querycharacterindex, spaceindex - querycharacterindex);
+										} else if (querycharacterindex <= 1) { //For no query string queries, such as page requests for FAP.React
+											querycharacterindex = header.IndexOf(' ', pagefinderindex) + 1; //query character becomes ' '
+											path = header.Substring(pagefinderindex, querycharacterindex - pagefinderindex - 1);
 										}
 										header = header.Substring(spaceindex + 1, (header.Length - spaceindex) - 1); //Gets the HTTP version
 									}
@@ -458,7 +469,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				message = Encoding.UTF8.GetString(utf8bytes.ToArray());
 				#endregion
 				#region PageProcessor
-				Page staticpage; //Static data remains untouched
+
 				if (querystring.Length > MTU) {
 					code = "414"; //If the query string turns out to be greater than the MTU, generate an URI too big error
 					headers = string.Empty; //Necessary, as otherwise the framework will append the request headers on error
@@ -466,51 +477,39 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					code = "431"; //If the query string turns out to be greater than the MTU, generate an URI too big error
 					headers = string.Empty;
 				} else if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out staticpage)) {
-					thispage = (Page)Activator.CreateInstance(staticpage.GetType());
-					thispage.Path = staticpage.Path;
-					//Functions
-					thispage.get = staticpage.get;
-					thispage.put = staticpage.put;
-					thispage.post = staticpage.post;
-					thispage.delete = staticpage.delete;
-					//For polymorphics
-					thispage.Headers = headers;
-					thispage.UserIP = ipaddress;
-					thispage.UserAgent = useragent;
+					//thispage = (Page)Activator.CreateInstance(staticpage.GetType());
+					hashsum = ipaddress.GetHashCode() + useragent.GetHashCode();
+					if (!staticpage.PageCache.TryGetValue(hashsum, out thispage)) {
+						thispage = (Page)Activator.CreateInstance(staticpage.GetType());
+						thispage.Path = staticpage.Path; //Necessary for FAP.React
+						//Functions, set at creation in case of being reassigned during runtime
+						thispage.get = staticpage.get;
+						thispage.put = staticpage.put;
+						thispage.post = staticpage.post;
+						thispage.delete = staticpage.delete;
+						//These two cannot possibly change per each page instance
+						thispage.UserIP = ipaddress;
+						thispage.UserAgent = useragent;
+						Task.Factory.StartNew(() => cacheAdd(hashsum, thispage, staticpage)); //Add it to the page cache in case the visitor returns
+					}
+					staticpage.lastpage = thispage; //Allows setting the header from a static class
+					thispage.Headers = headers; //this is assured to always need an update
 					//For functionals
 					staticpage.Headers = headers;
 					staticpage.UserIP = ipaddress;
 					staticpage.UserAgent = useragent;
+
 					switch (method1) {
 						case 'H': //Head
 						case 'G': //Get
 							{		//"HEAD" is identical to "GET", except no content is generated, this is ensured later
 								isCacheable = true;
 								output = await Task.FromResult<string>(thispage.Get(querystring, message));
-								currentHash = querystring.GetHashCode() + ipaddress.GetHashCode() + useragent.GetHashCode() + output.GetHashCode();
+
+								currentHash = hashsum + querystring.GetHashCode() + output.GetHashCode();
 								//Tested with a C# stopwatch, performing GetHashCode multiple times is indeed A LOT faster than concatenation, please ignore the integer overflows behind the curtain
 								if (requestEtag == String.Format("{0:x8}", currentHash)) //String.Format is slightly faster than int.Parse
-									code = "304"; //304 generation in three lines!
-								/*
-                                try { //I'll keep this code, maybe to paste into a task later, in case I realise I do need to stores hashes
-                                    if (cache304.TryGetValue(ipaddress, out clientCache)) {
-                                        if (clientCache.Contains(currentHash)) {
-                                            code = "304";
-                                        } else { //&& ifnonematch != String.Empty() &&  String.Format("{0:x}", currentHash) != ifnonematch
-                                            clientCache.Add(currentHash);
-                                            Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
-                                        }
-                                    } else {
-                                        clientCache = new HashSet<int>(); //New user
-                                        clientCache.Add(currentHash);
-                                        cache304.Add(ipaddress, clientCache);
-                                        Task.Factory.StartNew(() => CleanCache(clientCache, ipaddress, currentHash));
-                                    }
-                                    break;
-                                } catch {
-                                    Console.Error.WriteLine("07: " + DateTime.UtcNow + " caching error from " + ipaddress + " " + useragent + "\t\nAre you benchmarking or under attack?");
-                                    code = "503";
-                                }*/
+									code = "304";
 							}
 							break;
 						case 'P':
@@ -540,6 +539,10 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								contenttype = s.Substring(contenttypeheader.Length);
 								contenttype.Replace("\r", null);	//Remove the possible carriage return character
 								headers.Replace(s + '\n', null);	//Remove the entire content type line from the headers (or else there'll be double)
+								int startencoding;
+								if ((startencoding = contenttype.IndexOf('=')) > 0) {
+									encoder = Encoding.GetEncoding(contenttype.Substring(startencoding + 1).Replace("\r", null));
+								}
 							}
 						}
 					}
@@ -762,17 +765,17 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							outputheaderbuilder.Append(String.Format(
 								"\r\nServer: FAP.NET {0} Codename: Meisscanne\r\n" +
 								"Date: {1}\r\n" +
-								"Connection: close\r\n{2}{3}" +
+								"Connection: keep-alive\r\n{2}{3}" +
 								//"Expires: {1}\r\n" +
 								//"Cache-Control: private, max-age={4}, must-revalidate\r\n{5}{6}",
 								"Cache-Control: private, max-age=0, must-revalidate\r\n" +
 								"{4}",
 								VERSION,
 								DateTime.UtcNow.ToString("R"),
-								(outputbytelength > 0 ? "Content-type: " + contenttype + "; charset=utf-8\r\n" : string.Empty),
+								(outputbytelength > 0 ? "Content-type: " + contenttype + "; charset=" + encoder.WebName + "\r\n" : string.Empty),
 								(headers.Length > 0 ? headers.Substring(2) + "\r\n" : string.Empty),
 								//CacheMaxAge + (isIE ? string.Empty : ", no-cache"),
-								(isCacheable ? "ETag: \"" + String.Format("{0:x8}", currentHash) + "\"\r\n" : string.Empty)
+								(isCacheable ? "Etag: \"" + String.Format("{0:x8}", currentHash) + "\"\r\n" : string.Empty)
 							));
 							if (isGzip) {
 								outputheaderbuilder.Append("Content-Encoding: gzip\r\nTransfer-Encoding: Chunked\r\n\r\n");
@@ -811,12 +814,12 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 									outputheaderbuilder.Append(HTTP + H.R304 + String.Format("\r\n" +
 									"Server: FAP.NET {0} Codename: Meisscanne\r\n" +
 									"Date: {1}\r\n" +
-									"Connection: close\r\n" +
+									"Connection: keep-alive\r\n" +
 										//"Expires: {1}\r\n" +
 										//"Expires: -1\r\n" +
 										//"Cache-control: private, max-age={2}, must-revalidate\r\n" +
 									"Cache-control: private, max-age=0, must-revalidate\r\n" +
-									"ETag: \"{2}\"\r\n\r\n",
+									"Etag: \"{2}\"\r\n\r\n",
 										VERSION,
 										DateTime.UtcNow.ToString("R"),
 										//CacheMaxAge + (isIE ? string.Empty : ", no-cache"),
@@ -1124,27 +1127,38 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					var error501 = Encoding.UTF8.GetBytes(HTTP + H.G501 + "\r\n\r\n");
 					client.Send(error501, error501.Length, 0);
 				}
-
+				#endregion
 				//stream.Close();
 				//client.Close();
 				//client.Disconnect(true); //Do this after the connection code instead, for reasons
 			} catch (Exception e) {
-				Console.Error.WriteLine("05: " + DateTime.UtcNow + " That was a bad client  " + ipaddress + " " + useragent + "\n" + e);
+				var error444 = Encoding.UTF8.GetBytes(H.E444); //An exceptional error
+				client.Send(error444, error444.Length, 0);
+				Console.Error.WriteLine("01: " + DateTime.UtcNow + " Connection exception from client:  " + ipaddress + " " + useragent + "\n\t" + e.Message);
 				//ResetListener(true);
 			}
-			#endregion
 		}
 
-		/*
-        async void CleanCache(HashSet<int> clientcache, string ipheaders, int hash)
-        {
-            await Task.Delay(CacheMaxAge);
-            if (clientcache != null && clientcache.Count > 0)
-                clientcache.Remove(hash);
-            if (clientcache.Count == 0)
-                cache304.Remove(ipheaders);
-        }
-*/
+
+		async void cacheAdd(int cacheVars, Page toAdd, Page parentPage)
+		{
+			try {
+				parentPage.PageCache.Add(cacheVars, toAdd);
+				while (toAdd != null) {
+					await Task.Delay(CacheMaxAge);
+					if (toAdd.PageAge > CacheMaxAge) {
+						parentPage.PageCache.Remove(cacheVars);
+						toAdd = null;
+						break;
+					}
+				}
+			} catch (Exception e) {
+				Console.Error.WriteLine("02: " + DateTime.UtcNow + " Async Exception " + e.Message);
+				if (parentPage != null && parentPage.PageCache != null && parentPage.PageCache.ContainsKey(cacheVars))
+					parentPage.PageCache.Remove(cacheVars); //Oh the paranoia
+			}
+		}
+
 		/*
 		 async void ResetListener(bool force = false)
 		{
