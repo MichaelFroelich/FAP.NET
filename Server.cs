@@ -533,16 +533,20 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 						headers = string.Empty;
 					else {
 						const string contenttypeheader = "content-type:";
-						headers = "\r\n" + thispage.Headers; //Ensures at least one new line... yeah I know
+						headers = "\r\n" + thispage.Headers; //Ensures at least one new line and prevents a concatenation later on
 						foreach (string s in headers.Split('\n')) { //This has about a 50-100ns bottleneck, solution: forget about headers
 							if (s.ToLower().StartsWith(contenttypeheader)) {
 								contenttype = s.Substring(contenttypeheader.Length);
 								contenttype.Replace("\r", null);	//Remove the possible carriage return character
+								contenttype.Replace("\n", null);	//Remove the possible new line character
 								headers.Replace(s + '\n', null);	//Remove the entire content type line from the headers (or else there'll be double)
 								int startencoding;
 								if ((startencoding = contenttype.IndexOf('=')) > 0) {
-									encoder = Encoding.GetEncoding(contenttype.Substring(startencoding + 1).Replace("\r", null));
+									encoder = Encoding.GetEncoding(contenttype.Substring(startencoding + 1));
 								}
+								int endrealcontenttype = contenttype.IndexOf(';');
+								if (endrealcontenttype > 0)
+									contenttype = contenttype.Substring(0, endrealcontenttype - 1);
 							}
 						}
 					}
