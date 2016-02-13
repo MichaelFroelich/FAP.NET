@@ -394,7 +394,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 										if (querycharacterindex > 1 && querycharacterindex <= spaceindex) { //incase the query character is 'H', 'T', 'P', '1', '2', '.', or '/'
 											path = header.Substring(pagefinderindex, querycharacterindex - pagefinderindex - 1);
 											querystring = header.Substring(querycharacterindex, spaceindex - querycharacterindex);
-										} else if (querycharacterindex <= 1) { //For no query string queries, such as page requests for FAP.React
+										} else { //For no query string queries, such as page requests for FAP.React or blank queries from NGINX (which will drop the querycharacter)
 											querycharacterindex = header.IndexOf(' ', pagefinderindex) + 1; //query character becomes ' '
 											path = header.Substring(pagefinderindex, querycharacterindex - pagefinderindex - 1);
 										}
