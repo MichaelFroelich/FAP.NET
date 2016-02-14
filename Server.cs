@@ -332,6 +332,8 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			return (int)onebyteinput[0];
 		}
 		*/
+
+
 		async void Parse(Socket client)
 		{
 			//char input;
@@ -546,7 +548,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								}
 								int endrealcontenttype = contenttype.IndexOf(';');
 								if (endrealcontenttype > 0)
-									contenttype = contenttype.Substring(0, endrealcontenttype - 1);
+									contenttype = contenttype.Substring(0, endrealcontenttype);
 							}
 						}
 					}
