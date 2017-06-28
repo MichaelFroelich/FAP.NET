@@ -1,4 +1,4 @@
-# FAP.NET [![NuGet](https://img.shields.io/nuget/v/FAP.dll.svg?maxAge=2592000)](https://www.nuget.org/packages/FAP.dll/)
+# FAP.NET [![NuGet](https://img.shields.io/nuget/v/FAP.dll.svg?maxAge=2592000)](https://www.nuget.org/packages/FAP.dll/) [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=michaeljfroelich%40gmail%2ecom&lc=AU&currency_code=AUD&bn=PP%2dDonationsBF%3abtn_donate_SM%2egif%3aNonHostedGuest)
 
 If you found this library framework useful, wish to demonstrate your gratitude or just want to brighten my day, feel free to donate from my website! Lastly, please contact me through Github or on my website or shoot me an email if there are any issues.
 
