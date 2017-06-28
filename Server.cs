@@ -24,7 +24,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 	/// </summary>
 	public class Server
 	{
-		
+
 
 		/* Constants */
 		//Have a maximum of this many connections possible, set at 21000 as of 1.0.9
@@ -44,7 +44,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		const string HTTP = "HTTP/1.1 ";
 
 		//current FAP version,
-		const string VERSION = "1.1.1";
+		const string VERSION = "1.1.2";
 
 		//Timeout for both send and receive
 		const int TIMEOUT = 32;
@@ -90,6 +90,51 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			get { return port; }
 		}
 
+        /// <summary>
+        /// Defines the method of replicating classes per instance, manual is fast, reflection copies everything, binary serialises it and then deserialises it
+        /// Custom requires that the CustomMethod function is defined
+        /// </summary>
+        public enum CloneMethod{
+            /// <summary>
+            /// The most performant way, but only ensures the 4 HTTP verbs
+            /// </summary>
+            Manual,
+            /// <summary>
+            /// Uses reflection, not as performant as binary but ensures most things get copied
+            /// </summary>
+            Reflection,
+            /// <summary>
+            /// Serialises/deserialises the class with BinaryFormatter, but requires everything is either attributed with [Serializable] or [NonSerialized]
+            /// </summary>
+            Binary,
+            /// <summary>
+            /// Relies on CustomMethod being defined or will revert to manual and print an error
+            /// </summary>
+            Custom
+        }
+
+        Page manualmethod(Page thispage, Page staticpage)
+        {
+            thispage.Path = staticpage.Path;
+            thispage.get = staticpage.get;
+            thispage.put = staticpage.put;
+            thispage.post = staticpage.post;
+            thispage.delete = staticpage.delete;
+            return thispage;
+        }
+
+        /// <summary>
+        /// Defines the custom method of replicating classes per instance, for instance for JSON.NET users:
+        /// CustomMethod = p => JToken.FromObject(p).DeepClone();
+        /// This function takes the static page and must return a cloned page. Do not return the static page.
+        /// </summary>
+        public Func<Page,Page> CustomMethod { get; set; }
+
+        /// <summary>
+        /// Defines the method of replicating Page objects, manual is fast and default, reflection copies everything, custom is however you like
+        /// </summary>
+        public CloneMethod Method { get; set; } = CloneMethod.Manual;
+
 		//Port to listen on
 		/// <summary>
 		/// Address to listen on
@@ -114,7 +159,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			set;
 		}
 
-		
+
 		/// <summary>
 		/// Gets or sets the maximum age of a cached page, such that page instances will remain in memory for a maximum of this amount of time,
 		/// provided that the page is not accessed by a client user.
@@ -127,7 +172,8 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 
 
 		/// <summary>
-		/// Gets or sets the Maximum Transmission Unit, used for determining whether to use chunked transfer encoding or not. Note, if you're using this framework as intended (proxied through NGINX or Apache), your static webserver/proxy may chunk anyway.
+		/// Gets or sets the Maximum Transmission Unit, used for determining whether to use chunked transfer encoding or not. 
+        /// Note, if you're using this framework as intended (proxied through NGINX or Apache), your static webserver/proxy may chunk anyway.
 		/// </summary>
 		/// <value>The Maximum Transmission Unit.</value>
 		public int MTU {
@@ -204,7 +250,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 		/// <param name="inList">An IEnumerable of pages, try "Your data structure".Values</param>
 		/// <param name="IpAddress">IP address, likely the default: 127.0.0.1 (please use a static webserver in conjunction with FAP.net)</param>
 		/// <param name="port">Port or application port for a complete socket, default is 1024</param>
-		/// <param name="mtu">mtu or Maximum Transmission Unit is the maximum size of a tcp packet, used for determining whether to use chunked transfer encoding or not</param>
+		/// <param name="mtu">mtu or Maximum Transmission Unit is the maximum size of a tcp packet afterwhich chunking is used, set to below zero to disable chunking altogether</param>
 		public Server(IEnumerable<Page> inList = null, string IpAddress = "127.0.0.1", int port = 1024, int mtu = 65535)
 		{
 			pagelist = new Dictionary<string, Page>();
@@ -271,69 +317,6 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			Stop();
 		}
 
-		/*
-        async void Listen()
-        {
-            if (listenercount > SERVERCOOL)
-            {		//If there's less than SC listeners, it's a good idea to create more
-                do
-                {
-                    await Task.Yield();				//There is no thread
-                } while (listener.Poll(-1,SelectMode.SelectRead));		//Do not spawn whilst the server is being spammed, reserve the ticks for processing
-            }
-            try
-            {
-                listenercount++;
-                listener.BeginAccept(ListenerCallback, listener);
-            }
-            catch (Exception e)
-            {
-                Console.Error.WriteLine("02: " + DateTime.UtcNow + " Listener error: " + e.Message);
-                if (!listener.IsBound)
-                {
-                    Console.Error.Write(", will attempt to reset in 0.5 seconds");
-                    Thread.Sleep(500);      //now working with VisualStudio, which does not allow await in a catch statement
-                    if (!listener.IsBound)  //IF the listener is still not listening THEN do something about it
-                        ResetListener(true);
-                    listenercount--;
-                }
-            }
-        }
-
-        void ListenerCallback(IAsyncResult result)
-        {
-            try
-            {
-                using (var c = listener.EndAccept(result))
-                {
-                    listenercount--; 						//Do this as soon as posible in case more listeners need to be spawned
-                    //Parse(c);								//This makes the assumption you're already in a unique thread
-                    c.Disconnect(true);
-                }
-            }
-            catch
-            { //This does hide errors... but even Apache and NGINX reset their listeners, so should we and it's always going to throw errors
-                //Console.Error.WriteLine("03: " + DateTime.UtcNow + " Callback error, probably just resetting but specifically: " + e.Message);
-            }
-            listener.BeginAccept(ListenerCallback, listener);
-            //Listen();
-        }
-        */
-		/*
-		 static int ReadAByte(Socket socket)
-		{
-			byte[] onebyteinput = new byte[1];
-			try {
-				while (0 == socket.Receive(onebyteinput, 1, 0)) {
-				} //Polling is probably the quickest option, against callbacks
-			} catch {
-				return -1;
-			}
-			return (int)onebyteinput[0];
-		}
-		*/
-
-
 		async void Parse(Socket client)
 		{
 			//char input;
@@ -351,17 +334,22 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			string requestEtag = string.Empty;
 			//long contentlength = long.MinValue;
 			int currentHash = -1;
-			int outputbytelength;
+			long outputbytelength = 0;
 			int hashsum;
+            long bytestowrite = 0;
+            byte[] fs = null;
+			string hashinfo = string.Empty;
 			bool isCacheable = false;
 			bool isGzip = false;
 			Encoding encoder = Encoding.UTF8; //Used to switch between UTF8 and BigEndianUnicode for a last ditch attempt at binary safety
-			//bool isIE = false;
-			//HashSet<int> clientCache = null;
-			StringBuilder outputheaderbuilder = new StringBuilder();
+            Encoding inputencoder = Encoding.UTF8;
+            //bool isIE = false;
+            //HashSet<int> clientCache = null;
+            StringBuilder outputheaderbuilder = new StringBuilder();
 			StringBuilder inputheaderbuilder = new StringBuilder();
-			List<byte> utf8bytes = new List<byte>(); //Used for a whole number of times I read/write with utf8
-			Page thispage;
+			List<byte> utf8bytes = new List<byte>();  //Used for a whole number of times I read/write with utf8
+            List<byte> outputbytes = new List<byte>();//It's actually not easy to chunk without two...
+            Page thispage;
 			Page staticpage;
 			//client.NoDelay = NODELAY; //This is actually pointless after the connection has been opened, set on the TcpListener.Server instead
 			/*if (!client.Poll(1000, SelectMode.SelectRead))
@@ -400,14 +388,21 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 											querycharacterindex = header.IndexOf(' ', pagefinderindex) + 1; //query character becomes ' '
 											path = header.Substring(pagefinderindex, querycharacterindex - pagefinderindex - 1);
 										}
-										header = header.Substring(spaceindex + 1, (header.Length - spaceindex) - 1); //Gets the HTTP version
+										//header = header.Substring(spaceindex + 1, (header.Length - spaceindex) - 1); //Gets the HTTP version
 									}
-									break;/*
+									break;
 								case 'C': //Content-Length might not be possible
-									if (header.StartsWith("Content-Length", StringComparison.Ordinal)) {
-										contentlength = long.Parse(header.Substring(16));
+									if (header.StartsWith("Content-Type", StringComparison.Ordinal)) {
+                                        const string CHARSET = "charset=";
+                                        int contentbegin = header.IndexOf(CHARSET);
+                                        if(contentbegin > 0) {
+                                            inputencoder = Encoding.GetEncoding(header.Substring(contentbegin + CHARSET.Length));
+                                        }
+                                        if(header.Contains("image") || header.Contains("audio")) { //Override if charset was also given
+                                            inputencoder = Encoding.BigEndianUnicode; //These need the BigEndian hack
+                                        }
 									}
-									break;*/
+									break;
 								case 'I':
 									const string IFNONEMATCH = "If-None-Match";
 									if (header.StartsWith(IFNONEMATCH, StringComparison.Ordinal)) {
@@ -438,6 +433,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 										else
 											ipaddress = header.Substring(11, endcr - 11);
 									}
+									hashinfo += header; //generally, any X- header has enough logic to uniquely identify clients
 									break;
 							}
 							inputheaderbuilder.Append(header); //No matter what, append the header
@@ -453,7 +449,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				HeadersDone:
 				headers = inputheaderbuilder.ToString();
 				if (ipaddress == null) { //Next best guess for the ip address
-					ipaddress = (((IPEndPoint)client.RemoteEndPoint).Address.ToString());
+					ipaddress = hashinfo = (((IPEndPoint)client.RemoteEndPoint).Address.ToString());
 				}
 				if (bytestoread >= seek + 3) {
 					byte[] messagestart = new byte[bytestoread - (seek + 3)];
@@ -468,49 +464,99 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					client.Receive(bytesreceived, (int)bytestoread, 0);
 					utf8bytes.AddRange(bytesreceived);
 				}
-				message = Encoding.UTF8.GetString(utf8bytes.ToArray());
+				message = inputencoder.GetString(utf8bytes.ToArray());
 				#endregion
 				#region PageProcessor
 
-				if (querystring.Length > MTU) {
+				if (querystring.Length > MTU && MTU > 0) {
 					code = "414"; //If the query string turns out to be greater than the MTU, generate an URI too big error
 					headers = string.Empty; //Necessary, as otherwise the framework will append the request headers on error
-				} else if (headers.Length > MTU) {
+				} else if (headers.Length > MTU && MTU > 0) {
 					code = "431"; //If the query string turns out to be greater than the MTU, generate an URI too big error
 					headers = string.Empty;
 				} else if (!string.IsNullOrEmpty(path) && pagelist.TryGetValue(path, out staticpage)) {
 					//thispage = (Page)Activator.CreateInstance(staticpage.GetType());
-					hashsum = ipaddress.GetHashCode() + useragent.GetHashCode();
-					if (!staticpage.PageCache.TryGetValue(hashsum, out thispage)) {
-						thispage = (Page)Activator.CreateInstance(staticpage.GetType());
-						thispage.Path = staticpage.Path; //Necessary for FAP.React
-						//Functions, set at creation in case of being reassigned during runtime
-						thispage.get = staticpage.get;
-						thispage.put = staticpage.put;
-						thispage.post = staticpage.post;
-						thispage.delete = staticpage.delete;
-						//These two cannot possibly change per each page instance
-						thispage.UserIP = ipaddress;
-						thispage.UserAgent = useragent;
-						Task.Factory.StartNew(() => cacheAdd(hashsum, thispage, staticpage)); //Add it to the page cache in case the visitor returns
+					hashsum = hashinfo.GetHashCode() + useragent.GetHashCode();
+                    if (!staticpage.PageCache.TryGetValue(hashsum, out thispage)) {
+                        var type = staticpage.GetType();
+                        thispage = (Page)Activator.CreateInstance(type);
+                        switch(Method) {
+                            case CloneMethod.Manual:
+                                thispage = manualmethod(thispage,staticpage);
+                                thispage.UserIP = ipaddress;
+                                thispage.UserAgent = useragent;
+                                break;
+                            case CloneMethod.Custom:
+                                if (CustomMethod == null) {
+                                    Console.Error.WriteLine("08: Custom clone method exception, method appears undefined");
+                                    thispage = manualmethod(thispage, staticpage);
+                                }
+                                else
+                                    thispage = CustomMethod(staticpage);
+                                thispage.UserIP = ipaddress; //Somethings FAP really needs
+                                thispage.UserAgent = useragent;
+                                break;
+                            case CloneMethod.Reflection:
+                                var fields = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic  | System.Reflection.BindingFlags.Instance );
+                                foreach (var field in fields) { //This is a pure sacrifice of efficiency
+                                    var value = field.GetValue(staticpage); //Objects with millions of public members can bottleneck here
+                                    if(value != null)
+                                        field.SetValue(thispage, value);
+                                } //As always, the old ways are left for some may feel they are better
+                                break;
+                            case CloneMethod.Binary:
+                                Page newpage;
+                                try {
+                                    using (var s = new System.IO.MemoryStream()) {
+                                        var serialiser = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
+                                        serialiser.Serialize(s, staticpage);
+                                        s.Position = 0;
+                                        newpage = serialiser.Deserialize(s) as Page;
+                                    }
+                                }
+                                catch (Exception e) {
+                                    Console.Error.WriteLine("09: Binary clone method exception, are you missing a [Serializable] attribute?]. Message:\n" +  e.Message);
+                                    newpage = null;
+                                }
+                                if (newpage != null)
+                                    thispage = newpage;
+                                else {
+                                    thispage = manualmethod(thispage, staticpage);
+                                    thispage.UserIP = ipaddress;
+                                    thispage.UserAgent = useragent;
+                                }
+                                break;
+                        }
+                        Task.Factory.StartNew(() => cacheAdd(hashsum, thispage, staticpage)); //Add it to the page cache in case the visitor returns
 					}
+                    thispage.isstatic = false;
 					staticpage.lastpage = thispage; //Allows setting the header from a static class
 					thispage.Headers = headers; //this is assured to always need an update
 					//For functionals
 					staticpage.Headers = headers;
 					staticpage.UserIP = ipaddress;
 					staticpage.UserAgent = useragent;
-
+                    thispage.StaticParent = staticpage;
 					switch (method1) {
 						case 'H': //Head
 						case 'G': //Get
 							{		//"HEAD" is identical to "GET", except no content is generated, this is ensured later
 								isCacheable = true;
-								output = await Task.FromResult<string>(thispage.Get(querystring, message));
-
-								currentHash = hashsum + querystring.GetHashCode() + output.GetHashCode();
-								//Tested with a C# stopwatch, performing GetHashCode multiple times is indeed A LOT faster than concatenation, please ignore the integer overflows behind the curtain
-								if (requestEtag == String.Format("{0:x8}", currentHash)) //String.Format is slightly faster than int.Parse
+                                output = await Task.FromResult<string>(thispage.Get(querystring, message));
+                                if (thispage.GetFile != null) {//only 64 bytes are used for hashing.. it's from both ends at least
+                                    fs = thispage.GetFile;//also, processing short strings is faster than processing longs strings
+                                    utf8bytes = new List<byte>(fs);//files are potentially upwards of 3mb whereas web pages are rarely over 800kb
+                                    if (utf8bytes.Count > 31) { //this is intended to allow HTTP codes before binary data
+                                        output += Encoding.BigEndianUnicode.GetString(utf8bytes.GetRange(0, 32).ToArray());//utf8bytes is reused later
+                                        output += Encoding.BigEndianUnicode.GetString(utf8bytes.GetRange(fs.Length - 32, 32).ToArray());
+                                    }
+                                    else
+                                        output += Encoding.BigEndianUnicode.GetString(utf8bytes.ToArray());
+                                    thispage.GetFile = null; //for the next user...
+                                }
+                                currentHash = hashsum + querystring.GetHashCode() + output.GetHashCode(); //your file might be massive
+                                                                                                          //Tested with a C# stopwatch, performing GetHashCode multiple times is indeed A LOT faster than concatenation, please ignore the integer overflows behind the curtain
+                                if (requestEtag == String.Format("{0:x8}", currentHash)) //String.Format is slightly faster than int.Parse
 									code = "304";
 							}
 							break;
@@ -519,7 +565,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								if (method2 == 'U' || method2 == 'u')
 									output = await Task.FromResult<string>(thispage.Put(querystring, message));
 								else if (method2 == 'O' || method2 == 'o')
-									output = await Task.FromResult<string>(thispage.Post(querystring, message));
+								{
+									output = await Task.FromResult<string>(thispage.PostFile(querystring, utf8bytes));
+									if(output == null)
+										output = await Task.FromResult<string>(thispage.Post(querystring, message));
+								}
 								break;
 							}
 						case 'D':
@@ -552,24 +602,36 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							}
 						}
 					}
-				} else
+                    if (!string.IsNullOrEmpty(thispage.Code)) {
+                        code = thispage.Code;
+                    }
+                } else
 					headers = string.Empty;
 
 				#endregion PageProcessor
 				#region outputparse
 				if (code != "304" && !string.IsNullOrEmpty(output)) { //If we haven't generated a 304 or a nothing response
-					code = "200"; //Begin code as 200 for default success, but now include user HTTP codes
-					if (output.Length >= 5 && //Using the string length, not UTF8 length here as we're doing string operations
-					    Char.IsDigit(output[0]) && //If the first three characters are digits
-					    Char.IsDigit(output[1]) &&
-					    Char.IsDigit(output[2]) &&
-					    output[3] == '\r' && //If these three digits end with a line breaker
-					    output[4] == '\n') {
-						code = output.Substring(0, 3); //Then we have the code
-						output = (output.Length > 5) ? output.Remove(0, 5) : string.Empty; 	//And we can remove it from the output
-					}
-
-					if (contenttype == string.Empty) { //If the contenttype is undefined
+                    if (code == "404") { 
+                        code = "200"; //Begin code as 200 for default success, but now include user HTTP codes
+                        if (output.Length >= 5 && //Using the string length, not UTF8 length here as we're doing string operations
+                            char.IsDigit(output[0]) && //If the first three characters are digits
+                            char.IsDigit(output[1]) &&
+                            char.IsDigit(output[2]) &&
+						    output[3] == '\r' && //If these three digits end with a line breaker
+						    output[4] == '\n') {
+						    code = output.Substring(0, 3); //Then we have the code
+						    output = (output.Length > 5) ? output.Remove(0, 5) : string.Empty; 	//And we can remove it from the output
+					    }
+                    }
+                    if (fs != null) {
+                        outputbytelength = fs.LongLength; //this is why it's a byte[] in the Page API... I need the length in long
+                    }
+                    else {
+                        var oldoutputbytes = encoder.GetBytes(output);
+                        outputbytelength = oldoutputbytes.LongLength; //the golden length against.. what are you doing that's producing over 2GB of script?
+                        outputbytes = new List<byte>(oldoutputbytes); //This has to be done anyway
+                    }
+                    if (contenttype == string.Empty) { //If the contenttype is undefined
 						contenttype = "text/plain"; //Fail safe with text/plain
 						if (output.Length >= 2) { //If we have the bytes to sniff for a content type
 							var bytes = Encoding.ASCII.GetBytes(output.ToCharArray(0, 2)); //No longer using unicode, in fact ASCII does seem correct...
@@ -697,7 +759,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							}
 						}
 					}
-					outputbytelength = encoder.GetByteCount(output);
+                    if (fs != null) {
+                        if (contenttype == "text/plain") { 
+                            contenttype = "application/octet-stream"; //This is more appropriate if unknown binary data is sent
+                        }
+                    }
 				} else
 					outputbytelength = 0;
 
@@ -772,13 +838,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								"\r\nServer: FAP.NET {0} Codename: Meisscanne\r\n" +
 								"Date: {1}\r\n" +
 								"Connection: keep-alive\r\n{2}{3}" +
-								//"Expires: {1}\r\n" +
-								//"Cache-Control: private, max-age={4}, must-revalidate\r\n{5}{6}",
 								"Cache-Control: private, max-age=0, must-revalidate\r\n" +
 								"{4}",
 								VERSION,
 								DateTime.UtcNow.ToString("R"),
-								(outputbytelength > 0 ? "Content-type: " + contenttype + "; charset=" + encoder.WebName + "\r\n" : string.Empty),
+								(outputbytelength > 0 || MTU < 0 ? "Content-type: " + contenttype + "; charset=" + encoder.WebName + "\r\n" : string.Empty),
 								(headers.Length > 0 ? headers.Substring(2) + "\r\n" : string.Empty),
 								//CacheMaxAge + (isIE ? string.Empty : ", no-cache"),
 								(isCacheable ? "Etag: \"" + String.Format("{0:x8}", currentHash) + "\"\r\n" : string.Empty)
@@ -786,7 +850,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 							if (isGzip) {
 								outputheaderbuilder.Append("Content-Encoding: gzip\r\nTransfer-Encoding: Chunked\r\n\r\n");
 							} else {
-								if (outputbytelength < MTU) {
+								if (outputbytelength < MTU || MTU < 0) {
 									outputheaderbuilder.Append("Content-Length: " + outputbytelength + "\r\n\r\n");
 								} else
 									outputheaderbuilder.Append("Transfer-Encoding: Chunked\r\n\r\n");
@@ -818,14 +882,11 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 								case '4':
 									outputbytelength = 0;
 									outputheaderbuilder.Append(HTTP + H.R304 + String.Format("\r\n" +
-									"Server: FAP.NET {0} Codename: Meisscanne\r\n" +
-									"Date: {1}\r\n" +
-									"Connection: keep-alive\r\n" +
-										//"Expires: {1}\r\n" +
-										//"Expires: -1\r\n" +
-										//"Cache-control: private, max-age={2}, must-revalidate\r\n" +
-									"Cache-control: private, max-age=0, must-revalidate\r\n" +
-									"Etag: \"{2}\"\r\n\r\n",
+										"Server: FAP.NET {0} Codename: Meisscanne\r\n" +
+										"Date: {1}\r\n" +
+										"Connection: keep-alive\r\n" +
+										"Cache-control: private, max-age=0, must-revalidate\r\n" +
+										"Etag: \"{2}\"\r\n\r\n",
 										VERSION,
 										DateTime.UtcNow.ToString("R"),
 										//CacheMaxAge + (isIE ? string.Empty : ", no-cache"),
@@ -1096,39 +1157,52 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 				if (outputheaderbuilder.Length > 0) {
 					if (method1 == 'H')
 						outputbytelength = 0; //Right at the very, very end, to ensure the response is otherwise identical
-					if (outputbytelength < MTU) {
-						utf8bytes.Clear();
-						utf8bytes.AddRange(Encoding.UTF8.GetBytes(outputheaderbuilder.ToString())); //Favour utf8bytes.Add functions over string concatenation and ternary operations 
-						if (outputbytelength != 0) {// && method1 != 'H') { //don't check HEAD here, for the condition that outputbytelength > MTU and HEAD 
-							utf8bytes.AddRange(encoder.GetBytes(output));
-							utf8bytes.Add((byte)'\r');
-							utf8bytes.Add((byte)'\n');
-							if (isGzip) {
-								utf8bytes.Add((byte)'0');
-								utf8bytes.Add((byte)'\r');
-								utf8bytes.Add((byte)'\n');
-							}
-						}
-						//byte[] towrite = Encoding.UTF8.GetBytes(outputbuilder + (outputbytelength == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n"))));
-						client.Send(utf8bytes.ToArray(), utf8bytes.Count, 0);//stream.Write(towrite, 0, towrite.Length);
-					} else {
-						int bytestowrite = 0;
-						byte[] towrite = Encoding.UTF8.GetBytes(outputheaderbuilder.ToString());
-						client.Send(towrite, towrite.Length, 0);
-						var outputchararray = output.ToCharArray();
-						utf8bytes.Clear();
-						for (int i = 0; i < outputbytelength; i += MTU) {
-							bytestowrite = (outputbytelength - i > MTU) ? MTU : outputbytelength - i;
-							utf8bytes.AddRange(Encoding.UTF8.GetBytes(String.Format("{0:x}", bytestowrite) + "\r\n"));
-							utf8bytes.AddRange(encoder.GetBytes(outputchararray, i, bytestowrite));
-							utf8bytes.Add((byte)'\r');
-							utf8bytes.Add((byte)'\n');
-							client.Send(utf8bytes.ToArray(), utf8bytes.Count, 0);
-							utf8bytes.Clear();
-						}
-						//stream.Write(Encoding.UTF8.GetBytes("0\r\n"), 0, 3); //Finish, magic bullet is that it doesn't matter what failed up there
-						client.Send(Encoding.UTF8.GetBytes("0\r\n"), 3, 0);
-					}
+                    if (fs != null) {
+                        client.Send(Encoding.UTF8.GetBytes(outputheaderbuilder.ToString()));
+                        if ((outputbytelength < MTU || MTU < 0) && outputbytelength > 0 ) { //headers are already sent.
+                            client.Send(fs, (int)outputbytelength, 0);
+                            client.Send(new[] { (byte)'\r', (byte)'\n' });
+                        }
+                        else if(outputbytelength >= MTU) {
+                            outputbytes = new List<byte>(MTU);
+                            for (int i = 0; i < outputbytelength; i += MTU) {
+                                bytestowrite = (outputbytelength - i > MTU) ? MTU : outputbytelength - i;
+                                outputbytes.Clear();
+                                outputbytes.AddRange(Encoding.UTF8.GetBytes(String.Format("{0:x}", bytestowrite) + "\r\n"));
+                                outputbytes.AddRange(utf8bytes.GetRange(i, (int)bytestowrite));//here utf8bytes is reused
+                                outputbytes.AddRange(new[] { (byte)'\r', (byte)'\n' });
+                                client.Send(outputbytes.ToArray()); //In the end it's just not possible to chunk data easily without a List<byte>
+                            }
+                        }
+                    }
+                    else if (outputbytelength < MTU || MTU < 0) {
+                        utf8bytes.Clear();
+                        utf8bytes.AddRange(Encoding.UTF8.GetBytes(outputheaderbuilder.ToString())); //Favour utf8bytes.Add functions over string concatenation and ternary operations 
+                        if (outputbytelength != 0) {// && method1 != 'H') { //don't check HEAD here, for the condition that outputbytelength > MTU and HEAD 
+                            utf8bytes.AddRange(outputbytes);
+                            utf8bytes.AddRange(new[] { (byte)'\r', (byte)'\n' });
+                            if (isGzip) {
+                                utf8bytes.AddRange(new[] { (byte)'0', (byte)'\r', (byte)'\n' } );
+                            }
+                        }
+                        //byte[] towrite = Encoding.UTF8.GetBytes(outputbuilder + (outputbytelength == 0 ? string.Empty : (output + (isGzip ? "\r\n0\r\n" : "\r\n"))));
+                        client.Send(utf8bytes.ToArray(), utf8bytes.Count, 0);//stream.Write(towrite, 0, towrite.Length);
+                    }
+                    else {
+                        byte[] towrite = Encoding.UTF8.GetBytes(outputheaderbuilder.ToString());
+                        client.Send(towrite, towrite.Length, 0);
+                        utf8bytes.Clear();
+                        for (int i = 0; i < outputbytelength; i += MTU) {
+                            bytestowrite = (outputbytelength - i > MTU) ? MTU : outputbytelength - i;
+                            utf8bytes.AddRange(Encoding.UTF8.GetBytes(String.Format("{0:x}", bytestowrite) + "\r\n"));
+                            utf8bytes.AddRange(outputbytes.GetRange(i, (int)bytestowrite));
+                            utf8bytes.AddRange(new[] { (byte)'\r', (byte)'\n' });
+                            client.Send(utf8bytes.ToArray(), utf8bytes.Count, 0);
+                            utf8bytes.Clear();
+                        }
+                        //stream.Write(Encoding.UTF8.GetBytes("0\r\n"), 0, 3); //Finish, magic bullet is that it doesn't matter what failed up there
+                        client.Send(Encoding.UTF8.GetBytes("0\r\n"), 3, 0);
+                    }
 				} else {
 					var error501 = Encoding.UTF8.GetBytes(HTTP + H.G501 + "\r\n\r\n");
 					client.Send(error501, error501.Length, 0);
@@ -1145,7 +1219,6 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 			}
 		}
 
-
 		async void cacheAdd(int cacheVars, Page toAdd, Page parentPage)
 		{
 			try {
@@ -1159,7 +1232,7 @@ namespace FAP //Functional active pages , Functional programming And Pages, Free
 					}
 				}
 			} catch (Exception e) {
-				Console.Error.WriteLine("02: " + DateTime.UtcNow + " Async Exception " + e.Message);
+				Console.Error.WriteLine("02: " + DateTime.UtcNow + " Async Exception " + e.Message + "\nThis could be due to slow running code");
 				if (parentPage != null && parentPage.PageCache != null && parentPage.PageCache.ContainsKey(cacheVars))
 					parentPage.PageCache.Remove(cacheVars); //Oh the paranoia
 			}
